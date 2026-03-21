@@ -8,6 +8,8 @@ import {
   Animated,
   Alert,
   Platform,
+  TextInput,
+  KeyboardAvoidingView,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -38,6 +40,7 @@ export default function ReviewScreen() {
   const [sessionReviewed, setSessionReviewed] = useState(0);
   const [loading, setLoading] = useState(true);
   const [finished, setFinished] = useState(false);
+  const [typedText, setTypedText] = useState('');
 
   // Animations
   const scoreAnim = useRef(new Animated.Value(0)).current;
@@ -151,6 +154,31 @@ export default function ReviewScreen() {
       speech.stopListening();
     }
   }, [phase, speech]);
+
+  const handleSkip = useCallback(() => {
+    Alert.alert(
+      'Skip Verse',
+      'This verse will be re-queued at the end.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Skip',
+          onPress: () => {
+            setQueue((q) => {
+              const next = [...q];
+              const [skipped] = next.splice(currentIndex, 1);
+              next.push(skipped);
+              return next;
+            });
+            setHints(generateHints(queue[currentIndex + 1]?.text ?? queue[0].text));
+            setRevealedCount(0);
+            setTypedText('');
+            speech.reset();
+          },
+        },
+      ],
+    );
+  }, [currentIndex, queue, speech]);
 
   // ─── Loading / Empty / Finished states ─────────────────────────────────────
 
@@ -307,7 +335,10 @@ export default function ReviewScreen() {
       </ScrollView>
 
       {/* Bottom controls */}
-      <View style={styles.controls}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={styles.controls}
+      >
         {phase === 'scored' ? (
           <TouchableOpacity style={styles.nextBtn} onPress={advanceToNext}>
             <Text style={styles.nextBtnText}>
@@ -315,44 +346,16 @@ export default function ReviewScreen() {
             </Text>
             <Ionicons name="arrow-forward" size={20} color={Colors.surface} />
           </TouchableOpacity>
-        ) : (
+        ) : speech.isSupported ? (
+          /* ── Native mic UI ── */
           <View style={styles.micRow}>
             {phase === 'preview' && (
-              <TouchableOpacity
-                style={styles.skipBtn}
-                onPress={() => {
-                  Alert.alert(
-                    'Skip Verse',
-                    'This verse will be re-queued at the start.',
-                    [
-                      { text: 'Cancel', style: 'cancel' },
-                      {
-                        text: 'Skip',
-                        onPress: () => {
-                          // Move current verse to the end
-                          setQueue((q) => {
-                            const next = [...q];
-                            const [skipped] = next.splice(currentIndex, 1);
-                            next.push(skipped);
-                            return next;
-                          });
-                          setHints(generateHints(queue[currentIndex + 1]?.text ?? queue[0].text));
-                          setRevealedCount(0);
-                        },
-                      },
-                    ],
-                  );
-                }}
-              >
+              <TouchableOpacity style={styles.skipBtn} onPress={handleSkip}>
                 <Ionicons name="play-skip-forward-outline" size={22} color={Colors.textMuted} />
               </TouchableOpacity>
             )}
-
             <TouchableOpacity
-              style={[
-                styles.micBtn,
-                phase === 'reciting' && styles.micBtnActive,
-              ]}
+              style={[styles.micBtn, phase === 'reciting' && styles.micBtnActive]}
               onPress={handleMicPress}
               accessibilityLabel={phase === 'reciting' ? 'Stop recording' : 'Start recording'}
               accessibilityRole="button"
@@ -363,19 +366,52 @@ export default function ReviewScreen() {
                 color={Colors.surface}
               />
             </TouchableOpacity>
-
             <View style={styles.micHint}>
               <Text style={styles.micHintText}>
-                {phase === 'preview'
-                  ? 'Tap mic to recite'
-                  : phase === 'reciting'
-                  ? 'Listening... tap to stop'
+                {phase === 'preview' ? 'Tap mic to recite'
+                  : phase === 'reciting' ? 'Listening...'
                   : 'Processing...'}
               </Text>
             </View>
           </View>
+        ) : (
+          /* ── Text input fallback (Expo Go) ── */
+          <View style={styles.textInputArea}>
+            <View style={styles.textInputBanner}>
+              <Ionicons name="information-circle-outline" size={15} color={Colors.primary} />
+              <Text style={styles.textInputBannerText}>
+                Mic unavailable in Expo Go — type your recitation below
+              </Text>
+            </View>
+            <View style={styles.textInputRow}>
+              <TouchableOpacity style={styles.skipBtnSmall} onPress={handleSkip}>
+                <Ionicons name="play-skip-forward-outline" size={20} color={Colors.textMuted} />
+              </TouchableOpacity>
+              <TextInput
+                style={styles.textInput}
+                placeholder="Type verse from memory..."
+                placeholderTextColor={Colors.textLight}
+                value={typedText}
+                onChangeText={setTypedText}
+                multiline
+                returnKeyType="done"
+                blurOnSubmit
+              />
+              <TouchableOpacity
+                style={[styles.submitBtn, !typedText.trim() && styles.submitBtnDisabled]}
+                onPress={() => {
+                  if (!typedText.trim()) return;
+                  handleTranscript(typedText.trim());
+                  setTypedText('');
+                }}
+                disabled={!typedText.trim()}
+              >
+                <Ionicons name="checkmark" size={22} color={Colors.surface} />
+              </TouchableOpacity>
+            </View>
+          </View>
         )}
-      </View>
+      </KeyboardAvoidingView>
     </View>
   );
 }
@@ -663,5 +699,54 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
     color: Colors.primary,
+  },
+  skipBtnSmall: {
+    padding: 10,
+    borderRadius: 12,
+    backgroundColor: Colors.divider,
+  },
+  // ── Text input fallback (Expo Go) ──────────────────────────────────────────
+  textInputArea: {
+    gap: 8,
+  },
+  textInputBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: Colors.primary + '12',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  textInputBannerText: {
+    fontSize: 12,
+    color: Colors.primary,
+    flex: 1,
+  },
+  textInputRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: 8,
+  },
+  textInput: {
+    flex: 1,
+    backgroundColor: Colors.divider,
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontSize: 15,
+    color: Colors.text,
+    maxHeight: 100,
+  },
+  submitBtn: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: Colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  submitBtnDisabled: {
+    backgroundColor: Colors.textLight,
   },
 });
