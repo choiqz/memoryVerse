@@ -1,0 +1,53 @@
+{
+  "expo": {
+    "name": "memoryVerse",
+    "slug": "memory-verse",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#7C3AED"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.memoryverse.app",
+      "infoPlist": {
+        "NSSpeechRecognitionUsageDescription": "memoryVerse uses speech recognition to score your verse recitations.",
+        "NSMicrophoneUsageDescription": "memoryVerse needs microphone access to listen to your verse recitations."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#7C3AED"
+      },
+      "package": "com.memoryverse.app",
+      "permissions": [
+        "android.permission.RECORD_AUDIO"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png",
+      "bundler": "metro"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-sqlite",
+      [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "Allow memoryVerse to use the microphone for verse recitation.",
+          "speechRecognitionPermission": "Allow memoryVerse to use speech recognition to score your recitations."
+        }
+      ],
+      "expo-asset"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    },
+    "scheme": "memoryverse"
+  }
+}
