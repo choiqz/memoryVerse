@@ -37,6 +37,31 @@ function isSpeechRecognitionAvailable(): boolean {
 const NATIVE_AVAILABLE = isSpeechRecognitionAvailable();
 
 /**
+ * Strip overlapping suffix-prefix when appending a new speech segment.
+ * E.g. existing="he gave his only" + segment="his only begotten son"
+ * → returns "begotten son" (the non-overlapping part).
+ * Returns the full segment if no overlap is found.
+ */
+function stripOverlap(existing: string, segment: string): string {
+  if (!existing || !segment) return segment;
+  const existingWords = existing.toLowerCase().split(/\s+/);
+  const segmentWords = segment.split(/\s+/);
+  const segmentLower = segmentWords.map((w) => w.toLowerCase());
+
+  // Try progressively shorter suffixes of existing against prefix of segment
+  const maxCheck = Math.min(existingWords.length, segmentLower.length);
+  for (let overlap = maxCheck; overlap >= 1; overlap--) {
+    const existingSuffix = existingWords.slice(-overlap);
+    const segmentPrefix = segmentLower.slice(0, overlap);
+    if (existingSuffix.every((w, i) => w === segmentPrefix[i])) {
+      const remaining = segmentWords.slice(overlap);
+      return remaining.length > 0 ? remaining.join(' ') : '';
+    }
+  }
+  return segment;
+}
+
+/**
  * Hook for managing speech recognition in a review session.
  * Falls back gracefully when native module is unavailable (Expo Go).
  */
@@ -82,11 +107,15 @@ export function useSpeech(onFinalResult?: (transcript: string) => void): UseSpee
           if (isFinal) {
             // Accumulate final segments — don't auto-score; user presses Done
             if (text) {
-              finalTranscriptRef.current = finalTranscriptRef.current
-                ? finalTranscriptRef.current + ' ' + text
-                : text;
+              const deduped = stripOverlap(finalTranscriptRef.current, text);
+              if (deduped) {
+                finalTranscriptRef.current = finalTranscriptRef.current
+                  ? finalTranscriptRef.current + ' ' + deduped
+                  : deduped;
+              }
               setTranscript(finalTranscriptRef.current);
             }
+            interimRef.current = '';
             setInterimTranscript('');
             // Stay in listening state — user decides when to stop
             setState('listening');
@@ -111,6 +140,8 @@ export function useSpeech(onFinalResult?: (transcript: string) => void): UseSpee
           if (stoppedRef.current) return;
           // Recognizer auto-ended (e.g. silence timeout) but user hasn't
           // pressed Done — restart so they can keep reciting
+          interimRef.current = '';
+          setInterimTranscript('');
           addLog('auto-restarting recognizer...');
           try {
             // eslint-disable-next-line @typescript-eslint/no-var-requires
