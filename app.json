@@ -15,8 +15,8 @@
       "supportsTablet": false,
       "bundleIdentifier": "com.memoryverse.app",
       "infoPlist": {
-        "NSSpeechRecognitionUsageDescription": "memoryVerse uses speech recognition to score your verse recitations.",
-        "NSMicrophoneUsageDescription": "memoryVerse needs microphone access to listen to your verse recitations."
+        "NSSpeechRecognitionUsageDescription": "Allow memoryVerse to use speech recognition to score your recitations.",
+        "NSMicrophoneUsageDescription": "Allow memoryVerse to use the microphone for verse recitation."
       }
     },
     "android": {
@@ -48,6 +48,13 @@
     "experiments": {
       "typedRoutes": true
     },
-    "scheme": "memoryverse"
+    "scheme": "memoryverse",
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "c06297e3-3429-484e-ae0a-fa077f3115cf"
+      }
+    },
+    "owner": "jwchoi02"
   }
 }
