@@ -16,7 +16,6 @@ import type { UserStats } from '../lib/db/schema';
 export default function SettingsScreen() {
   const [stats, setStats] = useState<UserStats | null>(null);
   const [passThreshold, setPassThreshold] = useState(85);
-  const [dailyGoal, setDailyGoal] = useState(10);
   const [saving, setSaving] = useState(false);
 
   useFocusEffect(
@@ -24,17 +23,16 @@ export default function SettingsScreen() {
       getUserStats().then((s) => {
         setStats(s);
         setPassThreshold(s.passThreshold);
-        setDailyGoal(s.dailyGoal);
       });
     }, []),
   );
 
   const save = useCallback(async () => {
     setSaving(true);
-    await updateSettings({ passThreshold, dailyGoal });
+    await updateSettings({ passThreshold });
     setSaving(false);
     Alert.alert('Saved', 'Settings updated.');
-  }, [passThreshold, dailyGoal]);
+  }, [passThreshold]);
 
   const thresholdLabel = (t: number) => {
     if (t >= 95) return 'Strict (≥95%)';
@@ -96,27 +94,6 @@ export default function SettingsScreen() {
             </View>
           </View>
           <Text style={styles.sliderMax}>95%</Text>
-        </View>
-      </View>
-
-      {/* Daily goal */}
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Daily Goal</Text>
-        <Text style={styles.sectionSubtitle}>
-          How many verses you aim to review each day.
-        </Text>
-        <View style={styles.discreteSlider}>
-          {[5, 10, 15, 20, 30].map((v) => (
-            <TouchableOpacity
-              key={v}
-              style={[styles.discreteBtn, dailyGoal === v && styles.discreteBtnSelected]}
-              onPress={() => setDailyGoal(v)}
-            >
-              <Text style={[styles.discreteText, dailyGoal === v && styles.discreteTextSelected]}>
-                {v}
-              </Text>
-            </TouchableOpacity>
-          ))}
         </View>
       </View>
 

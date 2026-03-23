@@ -53,6 +53,14 @@ export default function ReviewScreen() {
     await handleTranscript(transcript);
   });
 
+  // Recover from stuck 'reciting' phase if speech errors out
+  // (e.g. permission denied or recognition failure)
+  useEffect(() => {
+    if (phase === 'reciting' && speech.state === 'error') {
+      setPhase('preview');
+    }
+  }, [phase, speech.state]);
+
   // Load due verses on mount
   useEffect(() => {
     getDueVerses().then((verses) => {
@@ -146,14 +154,19 @@ export default function ReviewScreen() {
     [],
   );
 
-  const handleMicPress = useCallback(() => {
-    if (phase !== 'reciting') {
-      setPhase('reciting');
-      speech.startListening();
-    } else {
-      speech.stopListening();
-    }
-  }, [phase, speech]);
+  const handleStartRecording = useCallback(() => {
+    setPhase('reciting');
+    speech.startListening();
+  }, [speech]);
+
+  const handleDoneReciting = useCallback(() => {
+    speech.stopListening();
+  }, [speech]);
+
+  const handleRestartReciting = useCallback(() => {
+    speech.reset();
+    setPhase('preview');
+  }, [speech]);
 
   const handleSkip = useCallback(() => {
     Alert.alert(
@@ -324,11 +337,15 @@ export default function ReviewScreen() {
           </View>
         )}
 
-        {/* Interim transcript */}
-        {phase === 'reciting' && speech.interimTranscript ? (
+        {/* Live transcript — shows accumulated text + current interim */}
+        {phase === 'reciting' && (speech.transcript || speech.interimTranscript) ? (
           <View style={styles.interimBox}>
-            <Text style={styles.interimText} numberOfLines={3}>
-              {speech.interimTranscript}
+            <Text style={styles.interimText}>
+              {speech.transcript}
+              {speech.transcript && speech.interimTranscript ? ' ' : ''}
+              {speech.interimTranscript ? (
+                <Text style={{ color: Colors.textMuted }}>{speech.interimTranscript}</Text>
+              ) : null}
             </Text>
           </View>
         ) : null}
@@ -348,32 +365,45 @@ export default function ReviewScreen() {
           </TouchableOpacity>
         ) : speech.isSupported ? (
           /* ── Native mic UI ── */
-          <View style={styles.micRow}>
-            {phase === 'preview' && (
+          phase === 'reciting' ? (
+            <View style={styles.recitingRow}>
+              <TouchableOpacity
+                style={styles.restartBtn}
+                onPress={handleRestartReciting}
+                accessibilityLabel="Restart recording"
+                accessibilityRole="button"
+              >
+                <Ionicons name="refresh" size={22} color={Colors.textMuted} />
+                <Text style={styles.restartBtnText}>Restart</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.doneBtn}
+                onPress={handleDoneReciting}
+                accessibilityLabel="Done reciting"
+                accessibilityRole="button"
+              >
+                <Ionicons name="checkmark-circle" size={24} color={Colors.surface} />
+                <Text style={styles.doneBtnText}>Done</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <View style={styles.micRow}>
               <TouchableOpacity style={styles.skipBtn} onPress={handleSkip}>
                 <Ionicons name="play-skip-forward-outline" size={22} color={Colors.textMuted} />
               </TouchableOpacity>
-            )}
-            <TouchableOpacity
-              style={[styles.micBtn, phase === 'reciting' && styles.micBtnActive]}
-              onPress={handleMicPress}
-              accessibilityLabel={phase === 'reciting' ? 'Stop recording' : 'Start recording'}
-              accessibilityRole="button"
-            >
-              <Ionicons
-                name={phase === 'reciting' ? 'stop' : 'mic'}
-                size={36}
-                color={Colors.surface}
-              />
-            </TouchableOpacity>
-            <View style={styles.micHint}>
-              <Text style={styles.micHintText}>
-                {phase === 'preview' ? 'Tap mic to recite'
-                  : phase === 'reciting' ? 'Listening...'
-                  : 'Processing...'}
-              </Text>
+              <TouchableOpacity
+                style={styles.micBtn}
+                onPress={handleStartRecording}
+                accessibilityLabel="Start recording"
+                accessibilityRole="button"
+              >
+                <Ionicons name="mic" size={36} color={Colors.surface} />
+              </TouchableOpacity>
+              <View style={styles.micHint}>
+                <Text style={styles.micHintText}>Tap mic to recite</Text>
+              </View>
             </View>
-          </View>
+          )
         ) : (
           /* ── Text input fallback (Expo Go) ── */
           <View style={styles.textInputArea}>
@@ -665,9 +695,46 @@ const styles = StyleSheet.create({
     shadowRadius: 16,
     elevation: 8,
   },
-  micBtnActive: {
-    backgroundColor: Colors.error,
-    shadowColor: Colors.error,
+  recitingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 16,
+  },
+  restartBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 24,
+    paddingVertical: 16,
+    borderRadius: 16,
+    borderWidth: 2,
+    borderColor: Colors.border,
+    backgroundColor: Colors.surface,
+  },
+  restartBtnText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: Colors.textMuted,
+  },
+  doneBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 32,
+    paddingVertical: 16,
+    borderRadius: 16,
+    backgroundColor: Colors.primary,
+    shadowColor: Colors.primary,
+    shadowOpacity: 0.3,
+    shadowOffset: { width: 0, height: 4 },
+    shadowRadius: 12,
+    elevation: 6,
+  },
+  doneBtnText: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: Colors.surface,
   },
   micHint: {
     width: 60,

@@ -40,7 +40,6 @@ export default function HomeScreen() {
 
   const streakDays = stats?.streak ?? 0;
   const totalXP = stats?.totalXP ?? 0;
-  const dailyGoal = stats?.dailyGoal ?? 10;
   const versesLearned = stats?.versesLearned ?? 0;
 
   return (
@@ -146,23 +145,6 @@ export default function HomeScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* Daily goal progress */}
-      {versesLearned > 0 && (
-        <View style={styles.goalCard}>
-          <Text style={styles.goalTitle}>Daily Goal</Text>
-          <View style={styles.goalBar}>
-            <View
-              style={[
-                styles.goalBarFill,
-                { width: `${Math.min(100, (dueCount === 0 ? dailyGoal : (dailyGoal - dueCount)) / dailyGoal * 100)}%` },
-              ]}
-            />
-          </View>
-          <Text style={styles.goalLabel}>
-            {dueCount === 0 ? dailyGoal : Math.max(0, dailyGoal - dueCount)}/{dailyGoal} reviewed today
-          </Text>
-        </View>
-      )}
     </ScrollView>
   );
 }
@@ -325,37 +307,6 @@ const styles = StyleSheet.create({
   },
   actionSub: {
     fontSize: 12,
-    color: Colors.textMuted,
-  },
-  goalCard: {
-    backgroundColor: Colors.surface,
-    borderRadius: 16,
-    padding: 16,
-    gap: 10,
-    shadowColor: '#000',
-    shadowOpacity: 0.04,
-    shadowOffset: { width: 0, height: 2 },
-    shadowRadius: 8,
-    elevation: 2,
-  },
-  goalTitle: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: Colors.text,
-  },
-  goalBar: {
-    height: 8,
-    backgroundColor: Colors.divider,
-    borderRadius: 4,
-    overflow: 'hidden',
-  },
-  goalBarFill: {
-    height: '100%',
-    backgroundColor: Colors.success,
-    borderRadius: 4,
-  },
-  goalLabel: {
-    fontSize: 13,
     color: Colors.textMuted,
   },
 });
