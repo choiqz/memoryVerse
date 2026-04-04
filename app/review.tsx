@@ -297,50 +297,7 @@ export default function ReviewScreen() {
       </View>
 
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        <Animated.View style={[styles.card, cardAnimStyle]}>
-          {/* Reference */}
-          <View style={styles.refContainer}>
-            <Title style={styles.reference} color={Colors.primary}>{ref}</Title>
-            <View style={styles.refAccent} />
-          </View>
-
-          {/* Hint words */}
-          <View style={styles.hintContainer}>
-            {hints.map((hw, i) => (
-              <Pressable
-                key={i}
-                onPress={() => phase === 'preview' && revealWord(i)}
-                disabled={phase !== 'preview' || hw.revealed}
-                style={styles.hintWordWrapper}
-                accessibilityLabel={hw.revealed ? hw.word : `Tap to reveal word ${i + 1}`}
-              >
-                {hw.revealed ? (
-                  <Animated.View entering={FadeIn.duration(300)}>
-                    <Text style={styles.hintWordRevealed}>{hw.word}</Text>
-                  </Animated.View>
-                ) : (
-                  <View style={styles.hintPill}>
-                    <Text style={styles.hintWord}>
-                      {hw.hint.charAt(0)}
-                      {'_'.repeat(Math.max(hw.word.length - 1, 2))}
-                    </Text>
-                  </View>
-                )}
-              </Pressable>
-            ))}
-          </View>
-
-          {revealedCount > 0 && (
-            <View style={styles.revealPenaltyRow}>
-              <Ionicons name="alert-circle" size={14} color={Colors.error} />
-              <Caption style={{ color: Colors.error }}>
-                -{revealedCount * REVEAL_PENALTY} XP ({revealedCount} revealed)
-              </Caption>
-            </View>
-          )}
-        </Animated.View>
-
-        {/* Score result card */}
+        {/* Score result card — shown first when scored */}
         {phase === 'scored' && (
           <ScoreCard
             score={score}
@@ -348,6 +305,51 @@ export default function ReviewScreen() {
             transcript={speech.transcript}
             verseText={verse.text}
           />
+        )}
+
+        {phase !== 'scored' && (
+          <Animated.View style={[styles.card, cardAnimStyle]}>
+            {/* Reference */}
+            <View style={styles.refContainer}>
+              <Title style={styles.reference} color={Colors.primary}>{ref}</Title>
+              <View style={styles.refAccent} />
+            </View>
+
+            {/* Hint words */}
+            <View style={styles.hintContainer}>
+              {hints.map((hw, i) => (
+                <Pressable
+                  key={i}
+                  onPress={() => phase === 'preview' && revealWord(i)}
+                  disabled={phase !== 'preview' || hw.revealed}
+                  style={styles.hintWordWrapper}
+                  accessibilityLabel={hw.revealed ? hw.word : `Tap to reveal word ${i + 1}`}
+                >
+                  {hw.revealed ? (
+                    <Animated.View entering={FadeIn.duration(300)}>
+                      <Text style={styles.hintWordRevealed}>{hw.word}</Text>
+                    </Animated.View>
+                  ) : (
+                    <View style={styles.hintPill}>
+                      <Text style={styles.hintWord}>
+                        {hw.hint.charAt(0)}
+                        {'_'.repeat(Math.max(hw.word.length - 1, 2))}
+                      </Text>
+                    </View>
+                  )}
+                </Pressable>
+              ))}
+            </View>
+
+            {revealedCount > 0 && (
+              <View style={styles.revealPenaltyRow}>
+                <Ionicons name="alert-circle" size={14} color={Colors.error} />
+                <Caption style={{ color: Colors.error }}>
+                  -{revealedCount * REVEAL_PENALTY} XP ({revealedCount} revealed)
+                </Caption>
+              </View>
+            )}
+          </Animated.View>
         )}
 
         {/* Speech error */}
@@ -431,12 +433,10 @@ function ScoreCard({
       entering={SlideInDown.springify().damping(20).stiffness(120)}
       style={[styles.scoreCard, { borderLeftColor: tier.color }]}
     >
-      <View style={styles.scoreTierRow}>
-        <IconBadge name={tier.icon} color={tier.color} size={24} bgOpacity={0.15} />
-        <View style={styles.scoreValues}>
-          <AnimatedCounter value={score} suffix="%" color={Colors.text} style={styles.scoreValue} />
-          <Title style={{ color: tier.color }}>{tier.label}</Title>
-        </View>
+      <View style={styles.scoreHero}>
+        <IconBadge name={tier.icon} color={tier.color} size={28} bgOpacity={0.15} />
+        <AnimatedCounter value={score} suffix="%" color={Colors.text} style={styles.scoreValue} />
+        <Title style={{ color: tier.color, textAlign: 'center' }}>{tier.label}</Title>
       </View>
 
       <View style={styles.xpEarnedRow}>
@@ -762,19 +762,17 @@ const styles = StyleSheet.create({
     borderLeftWidth: 4,
     ...Shadows.md,
   },
-  scoreTierRow: {
-    flexDirection: 'row',
+  scoreHero: {
     alignItems: 'center',
-    gap: Spacing.lg,
-  },
-  scoreValues: {
-    flex: 1,
-    gap: 2,
+    gap: Spacing.sm,
+    paddingVertical: Spacing.md,
   },
   scoreValue: {
     fontFamily: Fonts.extraBold,
-    fontSize: 34,
-    letterSpacing: -0.5,
+    fontSize: 48,
+    lineHeight: 56,
+    letterSpacing: -1,
+    textAlign: 'center',
   },
   xpEarnedRow: {
     flexDirection: 'row',

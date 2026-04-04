@@ -92,7 +92,7 @@ export const ConfettiOverlay = forwardRef<ConfettiRef>(function ConfettiOverlay(
     setVisible(true);
     trigger.value = 0;
     trigger.value = withTiming(1, {
-      duration: 1200,
+      duration: 1600,
       easing: Easing.out(Easing.cubic),
     }, (finished) => {
       if (finished) {
