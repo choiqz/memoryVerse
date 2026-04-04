@@ -96,7 +96,6 @@ export default function SettingsScreen() {
       {stats && (
         <Card style={styles.section}>
           <Title>Account Stats</Title>
-          <SettingsRow label="Total XP" value={stats.totalXP.toLocaleString()} />
           <SettingsRow label="Longest Streak" value={`${stats.longestStreak} days`} />
           <SettingsRow label="Verses in Library" value={String(stats.versesLearned)} />
         </Card>

@@ -71,11 +71,6 @@ export default function ProgressScreen() {
           <Overline>Best Streak</Overline>
         </Card>
         <Card style={styles.statCard}>
-          <IconBadge name="flash" color={Colors.xp} size={16} />
-          <Title style={{ color: Colors.primary }}>{(stats?.totalXP ?? 0).toLocaleString()}</Title>
-          <Overline>Total XP</Overline>
-        </Card>
-        <Card style={styles.statCard}>
           <IconBadge name="book" color={Colors.success} size={16} />
           <Title style={{ color: Colors.success }}>{stats?.versesLearned ?? 0}</Title>
           <Overline>Verses</Overline>
@@ -158,7 +153,6 @@ export default function ProgressScreen() {
               <View key={s.date} style={styles.sessionRow}>
                 <Body style={{ flex: 1 }}>{formatDate(s.date)}</Body>
                 <Caption>{s.versesReviewed} verses</Caption>
-                <Caption style={{ color: Colors.secondary, fontFamily: Fonts.bold }}>+{s.xpEarned} XP</Caption>
               </View>
             ))}
           </Card>

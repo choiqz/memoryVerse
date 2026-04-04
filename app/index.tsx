@@ -98,7 +98,6 @@ export default function HomeScreen() {
   }, [loadData]);
 
   const streakDays = stats?.streak ?? 0;
-  const totalXP = stats?.totalXP ?? 0;
   const versesLearned = stats?.versesLearned ?? 0;
 
   return (
@@ -131,14 +130,6 @@ export default function HomeScreen() {
           </Animated.View>
           <Title style={[styles.statValue, { color: Colors.streak }]}>{streakDays}</Title>
           <Overline>streak</Overline>
-        </View>
-
-        <View style={styles.statDivider} />
-
-        <View style={styles.statPill}>
-          <IconBadge name="flash" color={Colors.xp} size={14} />
-          <Title style={[styles.statValue, { color: Colors.secondary }]}>{totalXP.toLocaleString()}</Title>
-          <Overline>xp</Overline>
         </View>
 
         <View style={styles.statDivider} />

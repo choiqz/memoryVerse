@@ -41,7 +41,7 @@ import { getDueVerses, recordReview } from '../lib/db';
 import type { UserVerse, Verse } from '../lib/db/schema';
 import { useSpeech } from '../lib/speech';
 import { scoreSimilarity, generateHints, type HintWord } from '../lib/similarity';
-import { similarityToQuality, calculateXP, getMasteryLevel } from '../lib/srs';
+import { similarityToQuality, getMasteryLevel } from '../lib/srs';
 import { formatRef } from '../lib/bible';
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
@@ -71,9 +71,7 @@ export default function ReviewScreen() {
   const [phase, setPhase] = useState<ReviewPhase>('preview');
   const [hints, setHints] = useState<HintWord[]>([]);
   const [score, setScore] = useState<number>(0);
-  const [xpEarned, setXpEarned] = useState<number>(0);
   const [revealedCount, setRevealedCount] = useState(0);
-  const [sessionXP, setSessionXP] = useState(0);
   const [sessionReviewed, setSessionReviewed] = useState(0);
   const [loading, setLoading] = useState(true);
   const [finished, setFinished] = useState(false);
@@ -111,10 +109,8 @@ export default function ReviewScreen() {
       const similarity = scoreSimilarity(transcript, currentVerse.text);
       const penalty = revealedCount * REVEAL_PENALTY;
       const finalScore = Math.max(0, similarity - penalty);
-      const xp = calculateXP(similarityToQuality(finalScore));
 
       setScore(Math.round(finalScore));
-      setXpEarned(xp);
       setPhase('scored');
 
       if (finalScore >= 85) {
@@ -145,8 +141,6 @@ export default function ReviewScreen() {
   }, [queue, speech]);
 
   const advanceToNext = useCallback(() => {
-    const xp = xpEarned;
-    setSessionXP((prev) => prev + xp);
     setSessionReviewed((prev) => prev + 1);
 
     const nextIndex = currentIndex + 1;
@@ -162,7 +156,7 @@ export default function ReviewScreen() {
         cardOpacity.value = withTiming(1, { duration: 250, easing: Easing.out(Easing.cubic) });
       }
     });
-  }, [currentIndex, queue, xpEarned, cardOpacity, advanceState]);
+  }, [currentIndex, queue, cardOpacity, advanceState]);
 
   const revealWord = useCallback(
     (index: number) => {
@@ -257,12 +251,7 @@ export default function ReviewScreen() {
           <Card style={styles.finStatCard}>
             <IconBadge name="book" color={Colors.primary} size={16} />
             <AnimatedCounter value={sessionReviewed} color={Colors.primary} style={styles.finStatValue} />
-            <Overline>Verses</Overline>
-          </Card>
-          <Card style={styles.finStatCard}>
-            <IconBadge name="flash" color={Colors.xp} size={16} />
-            <AnimatedCounter value={sessionXP} prefix="+" color={Colors.secondary} style={styles.finStatValue} />
-            <Overline>XP Earned</Overline>
+            <Overline>Verses Reviewed</Overline>
           </Card>
         </View>
         <Button size="lg" onPress={() => router.back()}>Back to Home</Button>
@@ -290,10 +279,6 @@ export default function ReviewScreen() {
           {currentIndex + 1} / {queue.length}
         </Caption>
         <MasteryBadge level={mastery} showLabel size={12} />
-        <View style={styles.xpPill}>
-          <Ionicons name="flash" size={12} color={Colors.secondary} />
-          <Caption style={{ color: Colors.secondary }}>+{sessionXP}</Caption>
-        </View>
       </View>
 
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
@@ -301,7 +286,6 @@ export default function ReviewScreen() {
         {phase === 'scored' && (
           <ScoreCard
             score={score}
-            xpEarned={xpEarned}
             transcript={speech.transcript}
             verseText={verse.text}
           />
@@ -345,7 +329,7 @@ export default function ReviewScreen() {
               <View style={styles.revealPenaltyRow}>
                 <Ionicons name="alert-circle" size={14} color={Colors.error} />
                 <Caption style={{ color: Colors.error }}>
-                  -{revealedCount * REVEAL_PENALTY} XP ({revealedCount} revealed)
+                  -{revealedCount * REVEAL_PENALTY}% penalty ({revealedCount} revealed)
                 </Caption>
               </View>
             )}
@@ -417,12 +401,10 @@ export default function ReviewScreen() {
 
 function ScoreCard({
   score,
-  xpEarned,
   transcript,
   verseText,
 }: {
   score: number;
-  xpEarned: number;
   transcript: string;
   verseText: string;
 }) {
@@ -437,12 +419,6 @@ function ScoreCard({
         <IconBadge name={tier.icon} color={tier.color} size={28} bgOpacity={0.15} />
         <AnimatedCounter value={score} suffix="%" color={Colors.text} style={styles.scoreValue} />
         <Title style={{ color: tier.color, textAlign: 'center' }}>{tier.label}</Title>
-      </View>
-
-      <View style={styles.xpEarnedRow}>
-        <Ionicons name="flash" size={16} color={Colors.secondary} />
-        <AnimatedCounter value={xpEarned} prefix="+" color={Colors.secondary} delay={200} style={styles.xpEarnedText} />
-        <Caption style={{ color: Colors.secondary }}>XP</Caption>
       </View>
 
       {transcript ? (
@@ -676,16 +652,6 @@ const styles = StyleSheet.create({
   sessionCounter: {
     flex: 1,
   },
-  xpPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    backgroundColor: Colors.secondaryLight + '44',
-    borderRadius: Radii.sm,
-    paddingHorizontal: Spacing.sm,
-    paddingVertical: 3,
-  },
-
   // Scroll
   scrollContent: {
     padding: Spacing.xl,
@@ -773,20 +739,6 @@ const styles = StyleSheet.create({
     lineHeight: 56,
     letterSpacing: -1,
     textAlign: 'center',
-  },
-  xpEarnedRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    backgroundColor: Colors.secondaryLight + '33',
-    borderRadius: Radii.sm,
-    paddingHorizontal: Spacing.md,
-    paddingVertical: 6,
-    alignSelf: 'flex-start',
-  },
-  xpEarnedText: {
-    fontFamily: Fonts.bold,
-    fontSize: 16,
   },
   transcriptBox: {
     backgroundColor: Colors.divider,
