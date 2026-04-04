@@ -1,16 +1,21 @@
 import { useCallback, useState } from 'react';
 import {
   View,
-  Text,
   ScrollView,
   StyleSheet,
-  FlatList,
 } from 'react-native';
+import Animated, { FadeInUp } from 'react-native-reanimated';
 import { useFocusEffect } from 'expo-router';
 import { Colors } from '../constants/Colors';
+import { Fonts, Spacing, Radii, Shadows } from '../constants/Theme';
+import { Heading, Title, Body, Caption, Overline } from '../components/Typography';
+import { Card } from '../components/Card';
+import { IconBadge } from '../components/IconBadge';
+import { MasteryBadge } from '../components/MasteryBadge';
+import { ProgressBar } from '../components/ProgressBar';
 import { getUserStats, getAllUserVerses, getRecentSessions } from '../lib/db';
 import type { UserStats, UserVerse, Verse } from '../lib/db/schema';
-import { getMasteryLevel, MASTERY_LABELS, MASTERY_EMOJIS } from '../lib/srs';
+import { getMasteryLevel, MASTERY_LABELS, type MasteryLevel } from '../lib/srs';
 import { formatRef } from '../lib/bible';
 
 type UserVerseWithVerse = UserVerse & Verse;
@@ -41,7 +46,6 @@ export default function ProgressScreen() {
     'seedling': userVerses.filter((v) => getMasteryLevel(v.repetitions, v.interval) === 'seedling'),
   } as const;
 
-  // Build 30-day activity grid (7 rows × ~5 cols)
   const activityMap = new Map(sessions.map((s) => [s.date, s.versesReviewed]));
   const today = new Date();
   const activityGrid: Array<{ date: string; count: number }> = [];
@@ -54,149 +58,146 @@ export default function ProgressScreen() {
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      {/* Stats cards */}
-      <View style={styles.statsGrid}>
-        <StatCard
-          emoji="🔥"
-          value={String(stats?.streak ?? 0)}
-          label="Day Streak"
-          color={Colors.streak}
-        />
-        <StatCard
-          emoji="🏆"
-          value={String(stats?.longestStreak ?? 0)}
-          label="Best Streak"
-          color={Colors.secondary}
-        />
-        <StatCard
-          emoji="⚡"
-          value={(stats?.totalXP ?? 0).toLocaleString()}
-          label="Total XP"
-          color={Colors.primary}
-        />
-        <StatCard
-          emoji="📖"
-          value={String(stats?.versesLearned ?? 0)}
-          label="Verses"
-          color={Colors.success}
-        />
-      </View>
+      {/* Stats */}
+      <Animated.View entering={FadeInUp.duration(400)} style={styles.statsGrid}>
+        <Card style={styles.statCard}>
+          <IconBadge name="flame" color={Colors.streak} size={16} />
+          <Title style={{ color: Colors.streak }}>{stats?.streak ?? 0}</Title>
+          <Overline>Day Streak</Overline>
+        </Card>
+        <Card style={styles.statCard}>
+          <IconBadge name="trophy" color={Colors.secondary} size={16} />
+          <Title style={{ color: Colors.secondary }}>{stats?.longestStreak ?? 0}</Title>
+          <Overline>Best Streak</Overline>
+        </Card>
+        <Card style={styles.statCard}>
+          <IconBadge name="flash" color={Colors.xp} size={16} />
+          <Title style={{ color: Colors.primary }}>{(stats?.totalXP ?? 0).toLocaleString()}</Title>
+          <Overline>Total XP</Overline>
+        </Card>
+        <Card style={styles.statCard}>
+          <IconBadge name="book" color={Colors.success} size={16} />
+          <Title style={{ color: Colors.success }}>{stats?.versesLearned ?? 0}</Title>
+          <Overline>Verses</Overline>
+        </Card>
+      </Animated.View>
 
-      {/* Activity heatmap */}
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Activity (Last 30 Days)</Text>
-        <View style={styles.heatmap}>
-          {activityGrid.map(({ date, count }) => (
-            <View
-              key={date}
-              style={[
-                styles.heatCell,
-                count === 0 && styles.heatCell0,
-                count >= 1 && count < 5 && styles.heatCell1,
-                count >= 5 && count < 10 && styles.heatCell2,
-                count >= 10 && styles.heatCell3,
-              ]}
-            />
-          ))}
-        </View>
-        <View style={styles.heatLegend}>
-          <Text style={styles.heatLegendText}>Less</Text>
-          <View style={[styles.heatLegendCell, styles.heatCell0]} />
-          <View style={[styles.heatLegendCell, styles.heatCell1]} />
-          <View style={[styles.heatLegendCell, styles.heatCell2]} />
-          <View style={[styles.heatLegendCell, styles.heatCell3]} />
-          <Text style={styles.heatLegendText}>More</Text>
-        </View>
-      </View>
+      {/* Heatmap */}
+      <Animated.View entering={FadeInUp.delay(100).duration(400)}>
+        <Card style={styles.section}>
+          <Title>Activity (Last 30 Days)</Title>
+          <View style={styles.heatmap}>
+            {activityGrid.map(({ date, count }, i) => (
+              <Animated.View
+                key={date}
+                entering={FadeInUp.delay(i * 15).duration(200)}
+                style={[
+                  styles.heatCell,
+                  {
+                    backgroundColor:
+                      count === 0 ? Colors.divider :
+                      count < 5 ? Colors.primaryLight + '60' :
+                      count < 10 ? Colors.primaryLight :
+                      Colors.primary,
+                  },
+                ]}
+              />
+            ))}
+          </View>
+          <View style={styles.heatLegend}>
+            <Caption>Less</Caption>
+            <View style={[styles.heatLegendCell, { backgroundColor: Colors.divider }]} />
+            <View style={[styles.heatLegendCell, { backgroundColor: Colors.primaryLight + '60' }]} />
+            <View style={[styles.heatLegendCell, { backgroundColor: Colors.primaryLight }]} />
+            <View style={[styles.heatLegendCell, { backgroundColor: Colors.primary }]} />
+            <Caption>More</Caption>
+          </View>
+        </Card>
+      </Animated.View>
 
-      {/* Mastery breakdown */}
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Verse Mastery</Text>
-        {(['deep-rooted', 'rooted', 'growing', 'seedling'] as const).map((level) => {
-          const count = masteryGroups[level].length;
-          const total = userVerses.length;
-          const pct = total > 0 ? (count / total) * 100 : 0;
-          const color =
-            level === 'deep-rooted' ? Colors.deepRooted :
-            level === 'rooted' ? Colors.rooted :
-            level === 'growing' ? Colors.growing : Colors.seedling;
+      {/* Mastery */}
+      <Animated.View entering={FadeInUp.delay(200).duration(400)}>
+        <Card style={styles.section}>
+          <Title>Verse Mastery</Title>
+          {(['deep-rooted', 'rooted', 'growing', 'seedling'] as const).map((level) => {
+            const count = masteryGroups[level].length;
+            const total = userVerses.length;
+            const pct = total > 0 ? count / total : 0;
 
-          return (
-            <View key={level} style={styles.masteryRow}>
-              <Text style={styles.masteryEmoji}>{MASTERY_EMOJIS[level]}</Text>
-              <View style={styles.masteryInfo}>
-                <View style={styles.masteryLabelRow}>
-                  <Text style={styles.masteryLabel}>{MASTERY_LABELS[level]}</Text>
-                  <Text style={styles.masteryCount}>{count}</Text>
-                </View>
-                <View style={styles.masteryBar}>
-                  <View style={[styles.masteryBarFill, { width: `${pct}%`, backgroundColor: color }]} />
-                </View>
-              </View>
-            </View>
-          );
-        })}
-      </View>
-
-      {/* Recent activity */}
-      {sessions.length > 0 && (
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Recent Sessions</Text>
-          {sessions.slice(-7).reverse().map((s) => (
-            <View key={s.date} style={styles.sessionRow}>
-              <Text style={styles.sessionDate}>{formatDate(s.date)}</Text>
-              <Text style={styles.sessionVerses}>{s.versesReviewed} verses</Text>
-              <Text style={styles.sessionXP}>+{s.xpEarned} XP</Text>
-            </View>
-          ))}
-        </View>
-      )}
-
-      {/* All verses list */}
-      {userVerses.length > 0 && (
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>My Library ({userVerses.length})</Text>
-          {userVerses.map((uv) => {
-            const level = getMasteryLevel(uv.repetitions, uv.interval);
-            const color =
-              level === 'deep-rooted' ? Colors.deepRooted :
-              level === 'rooted' ? Colors.rooted :
-              level === 'growing' ? Colors.growing : Colors.seedling;
             return (
-              <View key={uv.id} style={styles.libraryItem}>
-                <View style={styles.libraryItemLeft}>
-                  <Text style={styles.libraryRef}>
-                    {formatRef(uv.book, uv.chapter, uv.verse)}
-                  </Text>
-                  <Text style={styles.libraryText} numberOfLines={2}>{uv.text}</Text>
-                </View>
-                <View style={[styles.masteryDot, { backgroundColor: color }]}>
-                  <Text style={styles.masteryDotText}>{MASTERY_EMOJIS[level]}</Text>
+              <View key={level} style={styles.masteryRow}>
+                <MasteryBadge level={level} size={16} />
+                <View style={styles.masteryInfo}>
+                  <View style={styles.masteryLabelRow}>
+                    <Caption style={{ color: Colors.text }}>{MASTERY_LABELS[level]}</Caption>
+                    <Caption>{count}</Caption>
+                  </View>
+                  <ProgressBar
+                    progress={pct}
+                    height={6}
+                    color={
+                      level === 'deep-rooted' ? Colors.deepRooted :
+                      level === 'rooted' ? Colors.rooted :
+                      level === 'growing' ? Colors.growing :
+                      Colors.seedling
+                    }
+                  />
                 </View>
               </View>
             );
           })}
-        </View>
+        </Card>
+      </Animated.View>
+
+      {/* Recent sessions */}
+      {sessions.length > 0 && (
+        <Animated.View entering={FadeInUp.delay(300).duration(400)}>
+          <Card style={styles.section}>
+            <Title>Recent Sessions</Title>
+            {sessions.slice(-7).reverse().map((s) => (
+              <View key={s.date} style={styles.sessionRow}>
+                <Body style={{ flex: 1 }}>{formatDate(s.date)}</Body>
+                <Caption>{s.versesReviewed} verses</Caption>
+                <Caption style={{ color: Colors.secondary, fontFamily: Fonts.bold }}>+{s.xpEarned} XP</Caption>
+              </View>
+            ))}
+          </Card>
+        </Animated.View>
+      )}
+
+      {/* Library */}
+      {userVerses.length > 0 && (
+        <Animated.View entering={FadeInUp.delay(400).duration(400)}>
+          <Card style={styles.section}>
+            <Title>My Library ({userVerses.length})</Title>
+            {userVerses.map((uv) => {
+              const level = getMasteryLevel(uv.repetitions, uv.interval);
+              return (
+                <View key={uv.id} style={styles.libraryItem}>
+                  <View style={styles.libraryItemLeft}>
+                    <Overline style={{ color: Colors.primary }}>
+                      {formatRef(uv.book, uv.chapter, uv.verse)}
+                    </Overline>
+                    <Caption numberOfLines={2}>{uv.text}</Caption>
+                  </View>
+                  <MasteryBadge level={level} size={14} />
+                </View>
+              );
+            })}
+          </Card>
+        </Animated.View>
       )}
 
       {userVerses.length === 0 && (
         <View style={styles.emptyState}>
-          <Text style={styles.emptyEmoji}>📖</Text>
-          <Text style={styles.emptyTitle}>No verses yet</Text>
-          <Text style={styles.emptyMsg}>Add verses from the Add Verses screen to start tracking your progress.</Text>
+          <IconBadge name="book-outline" color={Colors.textTertiary} size={28} bgOpacity={0.08} />
+          <Heading>No verses yet</Heading>
+          <Body color={Colors.textSecondary} style={{ textAlign: 'center' }}>
+            Add verses from the Add Verses screen to start tracking your progress.
+          </Body>
         </View>
       )}
     </ScrollView>
-  );
-}
-
-function StatCard({ emoji, value, label, color }: { emoji: string; value: string; label: string; color: string }) {
-  return (
-    <View style={styles.statCard}>
-      <Text style={styles.statEmoji}>{emoji}</Text>
-      <Text style={[styles.statValue, { color }]}>{value}</Text>
-      <Text style={styles.statLabel}>{label}</Text>
-    </View>
   );
 }
 
@@ -207,45 +208,28 @@ function formatDate(iso: string): string {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
-  content: { padding: 20, paddingBottom: 40, gap: 20 },
-  statsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
+  content: { padding: Spacing.xl, paddingBottom: 40, gap: Spacing.lg },
+
+  statsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm },
   statCard: {
     flex: 1,
     minWidth: '45%',
-    backgroundColor: Colors.surface,
-    borderRadius: 16,
-    padding: 16,
     alignItems: 'center',
-    gap: 4,
-    shadowColor: '#000', shadowOpacity: 0.04,
-    shadowOffset: { width: 0, height: 2 }, shadowRadius: 8, elevation: 2,
+    gap: 6,
   },
-  statEmoji: { fontSize: 24 },
-  statValue: { fontSize: 26, fontWeight: '800' },
-  statLabel: { fontSize: 11, color: Colors.textMuted, fontWeight: '600', textTransform: 'uppercase' },
-  section: {
-    backgroundColor: Colors.surface,
-    borderRadius: 16,
-    padding: 16,
-    gap: 12,
-    shadowColor: '#000', shadowOpacity: 0.04,
-    shadowOffset: { width: 0, height: 2 }, shadowRadius: 8, elevation: 2,
-  },
-  sectionTitle: { fontSize: 16, fontWeight: '700', color: Colors.text },
+
+  section: { gap: Spacing.md },
+
   heatmap: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 3,
   },
   heatCell: {
-    width: 18,
-    height: 18,
-    borderRadius: 4,
+    width: 20,
+    height: 20,
+    borderRadius: 5,
   },
-  heatCell0: { backgroundColor: Colors.divider },
-  heatCell1: { backgroundColor: Colors.primary + '40' },
-  heatCell2: { backgroundColor: Colors.primary + '80' },
-  heatCell3: { backgroundColor: Colors.primary },
   heatLegend: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -253,40 +237,29 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   heatLegendCell: { width: 14, height: 14, borderRadius: 3 },
-  heatLegendText: { fontSize: 11, color: Colors.textMuted },
-  masteryRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  masteryEmoji: { fontSize: 22, width: 32, textAlign: 'center' },
+
+  masteryRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm },
   masteryInfo: { flex: 1, gap: 4 },
   masteryLabelRow: { flexDirection: 'row', justifyContent: 'space-between' },
-  masteryLabel: { fontSize: 14, fontWeight: '600', color: Colors.text },
-  masteryCount: { fontSize: 14, fontWeight: '700', color: Colors.textMuted },
-  masteryBar: { height: 6, backgroundColor: Colors.divider, borderRadius: 3, overflow: 'hidden' },
-  masteryBarFill: { height: '100%', borderRadius: 3 },
+
   sessionRow: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: 6,
     borderBottomWidth: 1,
     borderBottomColor: Colors.divider,
+    gap: Spacing.md,
   },
-  sessionDate: { flex: 1, fontSize: 14, color: Colors.text, fontWeight: '500' },
-  sessionVerses: { fontSize: 13, color: Colors.textMuted, marginRight: 12 },
-  sessionXP: { fontSize: 13, fontWeight: '700', color: Colors.secondary },
+
   libraryItem: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 10,
-    paddingVertical: 8,
+    alignItems: 'center',
+    gap: Spacing.sm,
+    paddingVertical: Spacing.sm,
     borderBottomWidth: 1,
     borderBottomColor: Colors.divider,
   },
   libraryItemLeft: { flex: 1, gap: 2 },
-  libraryRef: { fontSize: 12, fontWeight: '700', color: Colors.primary, textTransform: 'uppercase' },
-  libraryText: { fontSize: 13, color: Colors.textMuted, lineHeight: 18 },
-  masteryDot: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
-  masteryDotText: { fontSize: 16 },
-  emptyState: { alignItems: 'center', padding: 40, gap: 12 },
-  emptyEmoji: { fontSize: 48 },
-  emptyTitle: { fontSize: 20, fontWeight: '700', color: Colors.text },
-  emptyMsg: { fontSize: 14, color: Colors.textMuted, textAlign: 'center', lineHeight: 22 },
+
+  emptyState: { alignItems: 'center', padding: 40, gap: Spacing.md },
 });

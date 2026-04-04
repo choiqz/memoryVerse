@@ -2,22 +2,31 @@ import { useCallback, useEffect, useState } from 'react';
 import {
   View,
   Text,
-  TouchableOpacity,
+  Pressable,
   FlatList,
   StyleSheet,
   TextInput,
-  SectionList,
   ActivityIndicator,
   Alert,
 } from 'react-native';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withSpring,
+  withSequence,
+} from 'react-native-reanimated';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { Colors } from '../constants/Colors';
+import { Fonts, Spacing, Radii, Shadows } from '../constants/Theme';
+import { Title, Body, Caption, Overline } from '../components/Typography';
 import { getAllBooks, getVersesByBook, getVersesByChapter, searchVerses, addVerseToLibrary, isVerseInLibrary } from '../lib/db';
 import type { Verse } from '../lib/db/schema';
 import { sortBooksByOrder, formatRef } from '../lib/bible';
 
 type Mode = 'books' | 'chapters' | 'verses' | 'search';
+
+const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
 export default function AddScreen() {
   const [mode, setMode] = useState<Mode>('books');
@@ -30,15 +39,14 @@ export default function AddScreen() {
   const [searchResults, setSearchResults] = useState<Verse[]>([]);
   const [libraryIds, setLibraryIds] = useState<Set<number>>(new Set());
   const [loading, setLoading] = useState(false);
+  const [searchFocused, setSearchFocused] = useState(false);
 
-  // Load books on mount
   useEffect(() => {
     getAllBooks().then((bks) => {
       setBooks(sortBooksByOrder(bks));
     });
   }, []);
 
-  // Load library membership for visible verses
   useEffect(() => {
     const verseList = mode === 'search' ? searchResults : verses;
     if (verseList.length === 0) return;
@@ -106,38 +114,22 @@ export default function AddScreen() {
   }, [mode]);
 
   const renderBookItem = ({ item }: { item: string }) => (
-    <TouchableOpacity style={styles.listItem} onPress={() => selectBook(item)}>
-      <Text style={styles.listItemText}>{item}</Text>
-      <Ionicons name="chevron-forward" size={18} color={Colors.textLight} />
-    </TouchableOpacity>
+    <Pressable style={styles.listItem} onPress={() => selectBook(item)}>
+      <Body style={styles.listItemText}>{item}</Body>
+      <Ionicons name="chevron-forward" size={16} color={Colors.textTertiary} />
+    </Pressable>
   );
 
   const renderChapterItem = ({ item }: { item: number }) => (
-    <TouchableOpacity style={styles.chapterChip} onPress={() => selectChapter(item)}>
-      <Text style={styles.chapterChipText}>{item}</Text>
-    </TouchableOpacity>
+    <Pressable style={styles.chapterChip} onPress={() => selectChapter(item)}>
+      <Title style={styles.chapterChipText}>{item}</Title>
+    </Pressable>
   );
 
   const renderVerseItem = ({ item }: { item: Verse }) => {
     const inLibrary = libraryIds.has(item.id);
     return (
-      <TouchableOpacity
-        style={[styles.verseItem, inLibrary && styles.verseItemAdded]}
-        onPress={() => toggleVerse(item)}
-        accessibilityLabel={`${formatRef(item.book, item.chapter, item.verse)} — ${inLibrary ? 'in library' : 'tap to add'}`}
-      >
-        <View style={styles.verseContent}>
-          <Text style={styles.verseRef}>v.{item.verse}</Text>
-          <Text style={styles.verseText} numberOfLines={3}>{item.text}</Text>
-        </View>
-        <View style={[styles.verseAddBtn, inLibrary && styles.verseAddBtnAdded]}>
-          <Ionicons
-            name={inLibrary ? 'checkmark' : 'add'}
-            size={20}
-            color={inLibrary ? Colors.success : Colors.primary}
-          />
-        </View>
-      </TouchableOpacity>
+      <VerseRow verse={item} inLibrary={inLibrary} onPress={() => toggleVerse(item)} />
     );
   };
 
@@ -148,30 +140,33 @@ export default function AddScreen() {
     <View style={styles.container}>
       {/* Search bar */}
       <View style={styles.searchRow}>
-        <View style={styles.searchBox}>
-          <Ionicons name="search" size={18} color={Colors.textMuted} />
+        <View style={[styles.searchBox, searchFocused && styles.searchBoxFocused]}>
+          <Ionicons name="search" size={18} color={searchFocused ? Colors.primary : Colors.textSecondary} />
           <TextInput
             style={styles.searchInput}
             placeholder="Search verses..."
-            placeholderTextColor={Colors.textLight}
+            placeholderTextColor={Colors.textTertiary}
             value={searchQuery}
             onChangeText={(text) => {
               handleSearch(text);
               if (text.length > 0) setMode('search');
               else if (mode === 'search') setMode('books');
             }}
+            onFocus={() => setSearchFocused(true)}
+            onBlur={() => setSearchFocused(false)}
             returnKeyType="search"
           />
           {searchQuery.length > 0 && (
-            <TouchableOpacity
+            <Pressable
               onPress={() => {
                 setSearchQuery('');
                 setSearchResults([]);
                 setMode('books');
               }}
+              hitSlop={8}
             >
-              <Ionicons name="close-circle" size={18} color={Colors.textMuted} />
-            </TouchableOpacity>
+              <Ionicons name="close-circle" size={18} color={Colors.textSecondary} />
+            </Pressable>
           )}
         </View>
       </View>
@@ -179,12 +174,12 @@ export default function AddScreen() {
       {/* Breadcrumb */}
       {!isSearchMode && (mode === 'chapters' || mode === 'verses') && (
         <View style={styles.breadcrumb}>
-          <TouchableOpacity onPress={goBack} style={styles.breadcrumbBack}>
+          <Pressable onPress={goBack} style={styles.breadcrumbBack} hitSlop={8}>
             <Ionicons name="chevron-back" size={18} color={Colors.primary} />
-          </TouchableOpacity>
-          <Text style={styles.breadcrumbText}>
-            {selectedBook}{selectedChapter ? ` · Chapter ${selectedChapter}` : ''}
-          </Text>
+          </Pressable>
+          <Caption style={{ color: Colors.text, fontFamily: Fonts.semiBold }}>
+            {selectedBook}{selectedChapter ? ` \u00B7 Chapter ${selectedChapter}` : ''}
+          </Caption>
         </View>
       )}
 
@@ -204,8 +199,8 @@ export default function AddScreen() {
           ItemSeparatorComponent={() => <View style={styles.separator} />}
           ListEmptyComponent={
             <View style={styles.emptyState}>
-              <Text style={styles.emptyText}>No Bible data loaded.</Text>
-              <Text style={styles.emptySubtext}>Make sure kjv.json is in assets/bible/</Text>
+              <Body color={Colors.textSecondary}>No Bible data loaded.</Body>
+              <Caption>Make sure kjv.json is in assets/bible/</Caption>
             </View>
           }
         />
@@ -234,9 +229,9 @@ export default function AddScreen() {
           ListEmptyComponent={
             !loading ? (
               <View style={styles.emptyState}>
-                <Text style={styles.emptyText}>
+                <Body color={Colors.textSecondary}>
                   {isSearchMode ? 'No results found.' : 'No verses in this chapter.'}
-                </Text>
+                </Body>
               </View>
             ) : null
           }
@@ -246,14 +241,54 @@ export default function AddScreen() {
   );
 }
 
+function VerseRow({ verse, inLibrary, onPress }: { verse: Verse; inLibrary: boolean; onPress: () => void }) {
+  const bounceScale = useSharedValue(1);
+  const bounceStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: bounceScale.value }],
+  }));
+
+  const handlePress = useCallback(() => {
+    if (!inLibrary) {
+      bounceScale.value = withSequence(
+        withSpring(1.2, { damping: 8 }),
+        withSpring(1, { damping: 12 }),
+      );
+    }
+    onPress();
+  }, [inLibrary, onPress]);
+
+  return (
+    <Pressable
+      style={[styles.verseItem, inLibrary && styles.verseItemAdded]}
+      onPress={handlePress}
+      accessibilityLabel={`${formatRef(verse.book, verse.chapter, verse.verse)} — ${inLibrary ? 'in library' : 'tap to add'}`}
+    >
+      <View style={styles.verseContent}>
+        <Overline style={{ color: Colors.primary }}>v.{verse.verse}</Overline>
+        <Body style={styles.verseText} numberOfLines={3}>{verse.text}</Body>
+      </View>
+      <AnimatedPressable
+        style={[styles.verseAddBtn, inLibrary && styles.verseAddBtnAdded, bounceStyle]}
+        onPress={handlePress}
+      >
+        <Ionicons
+          name={inLibrary ? 'checkmark' : 'add'}
+          size={20}
+          color={inLibrary ? Colors.success : Colors.primary}
+        />
+      </AnimatedPressable>
+    </Pressable>
+  );
+}
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: Colors.background,
   },
   searchRow: {
-    padding: 16,
-    paddingBottom: 8,
+    padding: Spacing.lg,
+    paddingBottom: Spacing.sm,
     backgroundColor: Colors.surface,
     borderBottomWidth: 1,
     borderBottomColor: Colors.border,
@@ -262,20 +297,27 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: Colors.divider,
-    borderRadius: 12,
-    paddingHorizontal: 12,
+    borderRadius: Radii.lg,
+    paddingHorizontal: Spacing.md,
     paddingVertical: 10,
-    gap: 8,
+    gap: Spacing.sm,
+    borderWidth: 1.5,
+    borderColor: 'transparent',
+  },
+  searchBoxFocused: {
+    borderColor: Colors.primary,
+    backgroundColor: Colors.surface,
   },
   searchInput: {
     flex: 1,
+    fontFamily: Fonts.regular,
     fontSize: 15,
     color: Colors.text,
   },
   breadcrumb: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 16,
+    paddingHorizontal: Spacing.lg,
     paddingVertical: 10,
     backgroundColor: Colors.surface,
     borderBottomWidth: 1,
@@ -285,13 +327,8 @@ const styles = StyleSheet.create({
   breadcrumbBack: {
     padding: 4,
   },
-  breadcrumbText: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: Colors.text,
-  },
   loadingRow: {
-    padding: 16,
+    padding: Spacing.lg,
     alignItems: 'center',
   },
   list: {
@@ -300,70 +337,55 @@ const styles = StyleSheet.create({
   listItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 16,
+    paddingHorizontal: Spacing.xl,
+    paddingVertical: Spacing.lg,
     backgroundColor: Colors.surface,
   },
   listItemText: {
     flex: 1,
-    fontSize: 16,
-    color: Colors.text,
-    fontWeight: '500',
   },
   separator: {
     height: 1,
     backgroundColor: Colors.divider,
-    marginLeft: 20,
+    marginLeft: Spacing.xl,
   },
   chaptersGrid: {
-    padding: 16,
-    gap: 8,
+    padding: Spacing.lg,
+    gap: Spacing.sm,
   },
   chapterChip: {
     flex: 1,
     margin: 4,
     aspectRatio: 1,
     backgroundColor: Colors.surface,
-    borderRadius: 12,
+    borderRadius: Radii.md,
     alignItems: 'center',
     justifyContent: 'center',
     maxWidth: 64,
-    shadowColor: '#000',
-    shadowOpacity: 0.04,
-    shadowOffset: { width: 0, height: 1 },
-    shadowRadius: 4,
-    elevation: 1,
+    ...Shadows.sm,
   },
   chapterChipText: {
-    fontSize: 17,
-    fontWeight: '700',
     color: Colors.primary,
   },
   verseItem: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    paddingHorizontal: 16,
+    paddingHorizontal: Spacing.lg,
     paddingVertical: 14,
     backgroundColor: Colors.surface,
-    gap: 12,
+    gap: Spacing.md,
   },
   verseItemAdded: {
     backgroundColor: Colors.successLight,
+    borderLeftWidth: 3,
+    borderLeftColor: Colors.success,
   },
   verseContent: {
     flex: 1,
     gap: 4,
   },
-  verseRef: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: Colors.primary,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
   verseText: {
     fontSize: 14,
-    color: Colors.text,
     lineHeight: 20,
   },
   verseAddBtn: {
@@ -382,16 +404,6 @@ const styles = StyleSheet.create({
   emptyState: {
     padding: 40,
     alignItems: 'center',
-    gap: 8,
-  },
-  emptyText: {
-    fontSize: 16,
-    color: Colors.textMuted,
-    fontWeight: '500',
-  },
-  emptySubtext: {
-    fontSize: 13,
-    color: Colors.textLight,
-    textAlign: 'center',
+    gap: Spacing.sm,
   },
 });

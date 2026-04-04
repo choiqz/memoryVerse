@@ -2,33 +2,70 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
-  TouchableOpacity,
+  Pressable,
   StyleSheet,
   ScrollView,
-  Animated,
   Alert,
   Platform,
   TextInput,
   KeyboardAvoidingView,
 } from 'react-native';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withSpring,
+  withTiming,
+  withRepeat,
+  withSequence,
+  withDelay,
+  FadeIn,
+  SlideInDown,
+  Easing,
+  runOnJS,
+  type SharedValue,
+} from 'react-native-reanimated';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { Colors } from '../constants/Colors';
+import { Fonts, Spacing, Radii, Shadows } from '../constants/Theme';
+import { Display, Heading, Title, Body, Caption, Overline } from '../components/Typography';
+import { Button } from '../components/Button';
+import { Card } from '../components/Card';
+import { IconBadge } from '../components/IconBadge';
+import { ProgressBar } from '../components/ProgressBar';
+import { AnimatedCounter } from '../components/AnimatedCounter';
+import { ConfettiOverlay, type ConfettiRef } from '../components/ConfettiOverlay';
+import { MasteryBadge } from '../components/MasteryBadge';
 import { getDueVerses, recordReview } from '../lib/db';
 import type { UserVerse, Verse } from '../lib/db/schema';
 import { useSpeech } from '../lib/speech';
 import { scoreSimilarity, generateHints, type HintWord } from '../lib/similarity';
-import { similarityToQuality, calculateXP, getMasteryLevel, MASTERY_LABELS } from '../lib/srs';
+import { similarityToQuality, calculateXP, getMasteryLevel } from '../lib/srs';
 import { formatRef } from '../lib/bible';
+
+const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
 type ReviewItem = UserVerse & Verse;
 type ReviewPhase = 'preview' | 'reciting' | 'scored';
 
-const REVEAL_PENALTY = 2; // XP penalty per revealed word
+const REVEAL_PENALTY = 2;
+
+const SCORE_TIERS = [
+  { min: 95, icon: 'star' as const, color: Colors.secondary, label: 'Perfect!' },
+  { min: 85, icon: 'checkmark-circle' as const, color: Colors.success, label: 'Great job!' },
+  { min: 70, icon: 'thumbs-up' as const, color: Colors.growing, label: 'Good effort' },
+  { min: 50, icon: 'refresh-circle' as const, color: Colors.streak, label: 'Keep practicing' },
+  { min: 0, icon: 'close-circle' as const, color: Colors.error, label: 'Try again' },
+];
+
+function getScoreTier(score: number) {
+  return SCORE_TIERS.find((t) => score >= t.min) ?? SCORE_TIERS[SCORE_TIERS.length - 1];
+}
 
 export default function ReviewScreen() {
   const router = useRouter();
+  const confettiRef = useRef<ConfettiRef>(null);
   const [queue, setQueue] = useState<ReviewItem[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [phase, setPhase] = useState<ReviewPhase>('preview');
@@ -42,9 +79,8 @@ export default function ReviewScreen() {
   const [finished, setFinished] = useState(false);
   const [typedText, setTypedText] = useState('');
 
-  // Animations
-  const scoreAnim = useRef(new Animated.Value(0)).current;
-  const cardAnim = useRef(new Animated.Value(1)).current;
+  // Reanimated values
+  const cardOpacity = useSharedValue(1);
 
   const currentVerse = queue[currentIndex];
 
@@ -53,15 +89,12 @@ export default function ReviewScreen() {
     await handleTranscript(transcript);
   });
 
-  // Recover from stuck 'reciting' phase if speech errors out
-  // (e.g. permission denied or recognition failure)
   useEffect(() => {
     if (phase === 'reciting' && speech.state === 'error') {
       setPhase('preview');
     }
   }, [phase, speech.state]);
 
-  // Load due verses on mount
   useEffect(() => {
     getDueVerses().then((verses) => {
       setQueue(verses);
@@ -84,7 +117,6 @@ export default function ReviewScreen() {
       setXpEarned(xp);
       setPhase('scored');
 
-      // Haptic feedback
       if (finalScore >= 85) {
         await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       } else if (finalScore >= 50) {
@@ -93,25 +125,20 @@ export default function ReviewScreen() {
         await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
       }
 
-      // Animate score card in
-      Animated.spring(scoreAnim, {
-        toValue: 1,
-        useNativeDriver: true,
-        tension: 120,
-        friction: 8,
-      }).start();
+      // Fire confetti on perfect score
+      if (finalScore >= 95) {
+        setTimeout(() => confettiRef.current?.fire(), 300);
+      }
 
-      // Persist the review result
       await recordReview(currentVerse.id, Math.round(finalScore));
     },
-    [currentVerse, revealedCount, scoreAnim],
+    [currentVerse, revealedCount],
   );
 
   const advanceToNext = useCallback(() => {
     const xp = xpEarned;
     setSessionXP((prev) => prev + xp);
     setSessionReviewed((prev) => prev + 1);
-    scoreAnim.setValue(0);
 
     const nextIndex = currentIndex + 1;
     if (nextIndex >= queue.length) {
@@ -119,25 +146,22 @@ export default function ReviewScreen() {
       return;
     }
 
-    // Animate card out then in
-    Animated.timing(cardAnim, {
-      toValue: 0,
-      duration: 200,
-      useNativeDriver: true,
-    }).start(() => {
-      setCurrentIndex(nextIndex);
-      setPhase('preview');
-      setHints(generateHints(queue[nextIndex].text));
-      setRevealedCount(0);
-      speech.reset();
-      Animated.spring(cardAnim, {
-        toValue: 1,
-        useNativeDriver: true,
-        tension: 80,
-        friction: 10,
-      }).start();
+    // Card out → in transition
+    cardOpacity.value = withTiming(0, { duration: 200 }, (done) => {
+      if (done) {
+        runOnJS(setCurrentIndex)(nextIndex);
+        runOnJS(setPhase)('preview');
+        runOnJS(setHints)(generateHints(queue[nextIndex].text));
+        runOnJS(setRevealedCount)(0);
+        runOnJS(resetSpeech)();
+        cardOpacity.value = withSpring(1, { damping: 12, stiffness: 100 });
+      }
     });
-  }, [currentIndex, queue, xpEarned, cardAnim, scoreAnim, speech]);
+  }, [currentIndex, queue, xpEarned, cardOpacity, speech]);
+
+  const resetSpeech = useCallback(() => {
+    speech.reset();
+  }, [speech]);
 
   const revealWord = useCallback(
     (index: number) => {
@@ -193,12 +217,16 @@ export default function ReviewScreen() {
     );
   }, [currentIndex, queue, speech]);
 
-  // ─── Loading / Empty / Finished states ─────────────────────────────────────
+  const cardAnimStyle = useAnimatedStyle(() => ({
+    opacity: cardOpacity.value,
+  }));
+
+  // ─── Loading / Empty / Finished states ─────────────────────────────────
 
   if (loading) {
     return (
       <View style={styles.center}>
-        <Text style={styles.loadingText}>Loading your review session...</Text>
+        <Body color={Colors.textSecondary}>Loading your review session...</Body>
       </View>
     );
   }
@@ -206,12 +234,12 @@ export default function ReviewScreen() {
   if (queue.length === 0) {
     return (
       <View style={styles.center}>
-        <Text style={styles.emptyEmoji}>🎉</Text>
-        <Text style={styles.emptyTitle}>All caught up!</Text>
-        <Text style={styles.emptyMsg}>No verses due for review. Come back tomorrow.</Text>
-        <TouchableOpacity style={styles.secondaryBtn} onPress={() => router.back()}>
-          <Text style={styles.secondaryBtnText}>Back to Home</Text>
-        </TouchableOpacity>
+        <Ionicons name="checkmark-circle" size={64} color={Colors.success} />
+        <Heading>All caught up!</Heading>
+        <Body color={Colors.textSecondary} style={{ textAlign: 'center' }}>
+          No verses due for review. Come back tomorrow.
+        </Body>
+        <Button variant="secondary" onPress={() => router.back()}>Back to Home</Button>
       </View>
     );
   }
@@ -219,133 +247,126 @@ export default function ReviewScreen() {
   if (finished) {
     return (
       <View style={styles.center}>
-        <Text style={styles.finishedEmoji}>🏆</Text>
-        <Text style={styles.finishedTitle}>Session Complete!</Text>
-        <View style={styles.sessionStats}>
-          <StatPill label="Verses" value={String(sessionReviewed)} icon="📖" />
-          <StatPill label="XP Earned" value={`+${sessionXP}`} icon="⚡" />
+        <ConfettiOverlay ref={confettiRef} />
+        <View style={styles.finishedIcon}>
+          <Ionicons name="checkmark-circle" size={48} color={Colors.success} />
         </View>
-        <TouchableOpacity style={styles.primaryBtn} onPress={() => router.back()}>
-          <Text style={styles.primaryBtnText}>Back to Home</Text>
-        </TouchableOpacity>
+        <Heading>Session Complete!</Heading>
+        <View style={styles.sessionStats}>
+          <Card style={styles.finStatCard}>
+            <IconBadge name="book" color={Colors.primary} size={16} />
+            <AnimatedCounter value={sessionReviewed} color={Colors.primary} style={styles.finStatValue} />
+            <Overline>Verses</Overline>
+          </Card>
+          <Card style={styles.finStatCard}>
+            <IconBadge name="flash" color={Colors.xp} size={16} />
+            <AnimatedCounter value={sessionXP} prefix="+" color={Colors.secondary} style={styles.finStatValue} />
+            <Overline>XP Earned</Overline>
+          </Card>
+        </View>
+        <Button size="lg" onPress={() => router.back()}>Back to Home</Button>
       </View>
     );
   }
 
-  // ─── Main review UI ─────────────────────────────────────────────────────────
+  // ─── Main review UI ────────────────────────────────────────────────────
 
   const verse = currentVerse!;
   const ref = formatRef(verse.book, verse.chapter, verse.verse);
   const mastery = getMasteryLevel(verse.repetitions, verse.interval);
-  const progress = (currentIndex / queue.length) * 100;
+  const progress = currentIndex / queue.length;
 
   return (
     <View style={styles.container}>
-      {/* Progress bar */}
-      <View style={styles.progressBar}>
-        <View style={[styles.progressFill, { width: `${progress}%` }]} />
-      </View>
+      <ConfettiOverlay ref={confettiRef} />
 
-      {/* Session counter */}
+      {/* Progress bar */}
+      <ProgressBar progress={progress} height={4} />
+
+      {/* Session counter row */}
       <View style={styles.sessionRow}>
-        <Text style={styles.sessionCounter}>
+        <Caption style={styles.sessionCounter}>
           {currentIndex + 1} / {queue.length}
-        </Text>
-        <View style={styles.masteryBadge}>
-          <Text style={styles.masteryText}>{MASTERY_LABELS[mastery]}</Text>
-        </View>
+        </Caption>
+        <MasteryBadge level={mastery} showLabel size={12} />
         <View style={styles.xpPill}>
-          <Text style={styles.xpPillText}>+{sessionXP} XP</Text>
+          <Ionicons name="flash" size={12} color={Colors.secondary} />
+          <Caption style={{ color: Colors.secondary }}>+{sessionXP}</Caption>
         </View>
       </View>
 
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        <Animated.View style={[styles.card, { opacity: cardAnim }]}>
+        <Animated.View style={[styles.card, cardAnimStyle]}>
           {/* Reference */}
-          <Text style={styles.reference}>{ref}</Text>
+          <View style={styles.refContainer}>
+            <Title style={styles.reference} color={Colors.primary}>{ref}</Title>
+            <View style={styles.refAccent} />
+          </View>
 
           {/* Hint words */}
           <View style={styles.hintContainer}>
             {hints.map((hw, i) => (
-              <TouchableOpacity
+              <Pressable
                 key={i}
                 onPress={() => phase === 'preview' && revealWord(i)}
                 disabled={phase !== 'preview' || hw.revealed}
                 style={styles.hintWordWrapper}
                 accessibilityLabel={hw.revealed ? hw.word : `Tap to reveal word ${i + 1}`}
               >
-                <Text
-                  style={[
-                    styles.hintWord,
-                    hw.revealed && styles.hintWordRevealed,
-                  ]}
-                >
-                  {hw.revealed ? hw.word : hw.hint}
-                </Text>
-              </TouchableOpacity>
+                {hw.revealed ? (
+                  <Animated.View entering={FadeIn.duration(300)}>
+                    <Text style={styles.hintWordRevealed}>{hw.word}</Text>
+                  </Animated.View>
+                ) : (
+                  <View style={styles.hintPill}>
+                    <Text style={styles.hintWord}>
+                      {hw.hint.charAt(0)}
+                      {'_'.repeat(Math.max(hw.word.length - 1, 2))}
+                    </Text>
+                  </View>
+                )}
+              </Pressable>
             ))}
           </View>
 
           {revealedCount > 0 && (
-            <Text style={styles.revealPenalty}>
-              -{revealedCount * REVEAL_PENALTY} XP penalty ({revealedCount} word{revealedCount !== 1 ? 's' : ''} revealed)
-            </Text>
+            <View style={styles.revealPenaltyRow}>
+              <Ionicons name="alert-circle" size={14} color={Colors.error} />
+              <Caption style={{ color: Colors.error }}>
+                -{revealedCount * REVEAL_PENALTY} XP ({revealedCount} revealed)
+              </Caption>
+            </View>
           )}
         </Animated.View>
 
         {/* Score result card */}
         {phase === 'scored' && (
-          <Animated.View
-            style={[
-              styles.scoreCard,
-              { opacity: scoreAnim, transform: [{ scale: scoreAnim }] },
-              score >= 85 ? styles.scoreCardGood : score >= 50 ? styles.scoreCardOkay : styles.scoreCardBad,
-            ]}
-          >
-            <Text style={styles.scoreEmoji}>
-              {score >= 95 ? '🌟' : score >= 85 ? '✅' : score >= 70 ? '👍' : score >= 50 ? '😅' : '❌'}
-            </Text>
-            <Text style={styles.scoreValue}>{score}%</Text>
-            <Text style={styles.scoreLabel}>
-              {score >= 95 ? 'Perfect!' : score >= 85 ? 'Great job!' : score >= 70 ? 'Good effort' : score >= 50 ? 'Keep practicing' : 'Try again soon'}
-            </Text>
-            <Text style={styles.xpEarned}>+{xpEarned} XP</Text>
-
-            {/* Transcript */}
-            {speech.transcript ? (
-              <View style={styles.transcriptBox}>
-                <Text style={styles.transcriptLabel}>You said:</Text>
-                <Text style={styles.transcriptText} numberOfLines={4}>
-                  {speech.transcript}
-                </Text>
-              </View>
-            ) : null}
-
-            {/* Full verse reveal */}
-            <View style={styles.fullVerseBox}>
-              <Text style={styles.fullVerseLabel}>Verse:</Text>
-              <Text style={styles.fullVerseText}>{verse.text}</Text>
-            </View>
-          </Animated.View>
+          <ScoreCard
+            score={score}
+            xpEarned={xpEarned}
+            transcript={speech.transcript}
+            verseText={verse.text}
+          />
         )}
 
         {/* Speech error */}
         {speech.error && phase !== 'scored' && (
           <View style={styles.errorBanner}>
             <Ionicons name="warning-outline" size={18} color={Colors.error} />
-            <Text style={styles.errorText}>{speech.error}</Text>
+            <Body style={{ color: Colors.error, flex: 1, fontSize: 14 }}>{speech.error}</Body>
           </View>
         )}
 
-        {/* Live transcript — shows accumulated text + current interim */}
+        {/* Live transcript */}
         {phase === 'reciting' && (speech.transcript || speech.interimTranscript) ? (
           <View style={styles.interimBox}>
             <Text style={styles.interimText}>
               {speech.transcript}
               {speech.transcript && speech.interimTranscript ? ' ' : ''}
               {speech.interimTranscript ? (
-                <Text style={{ color: Colors.textMuted }}>{speech.interimTranscript}</Text>
+                <Text style={{ color: Colors.textTertiary }}>{speech.interimTranscript}</Text>
               ) : null}
+              <Text style={styles.blinkingCursor}>|</Text>
             </Text>
           </View>
         ) : null}
@@ -357,104 +378,277 @@ export default function ReviewScreen() {
         style={styles.controls}
       >
         {phase === 'scored' ? (
-          <TouchableOpacity style={styles.nextBtn} onPress={advanceToNext}>
-            <Text style={styles.nextBtnText}>
-              {currentIndex + 1 < queue.length ? 'Next Verse' : 'Finish Session'}
-            </Text>
-            <Ionicons name="arrow-forward" size={20} color={Colors.surface} />
-          </TouchableOpacity>
+          <Button size="lg" onPress={advanceToNext}>
+            {currentIndex + 1 < queue.length ? 'Next Verse  \u2192' : 'Finish Session  \u2192'}
+          </Button>
         ) : speech.isSupported ? (
-          /* ── Native mic UI ── */
           phase === 'reciting' ? (
-            <View style={styles.recitingRow}>
-              <TouchableOpacity
-                style={styles.restartBtn}
-                onPress={handleRestartReciting}
-                accessibilityLabel="Restart recording"
-                accessibilityRole="button"
-              >
-                <Ionicons name="refresh" size={22} color={Colors.textMuted} />
-                <Text style={styles.restartBtnText}>Restart</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.doneBtn}
-                onPress={handleDoneReciting}
-                accessibilityLabel="Done reciting"
-                accessibilityRole="button"
-              >
-                <Ionicons name="checkmark-circle" size={24} color={Colors.surface} />
-                <Text style={styles.doneBtnText}>Done</Text>
-              </TouchableOpacity>
-            </View>
+            <RecitingControls
+              onRestart={handleRestartReciting}
+              onDone={handleDoneReciting}
+            />
           ) : (
-            <View style={styles.micRow}>
-              <TouchableOpacity style={styles.skipBtn} onPress={handleSkip}>
-                <Ionicons name="play-skip-forward-outline" size={22} color={Colors.textMuted} />
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.micBtn}
-                onPress={handleStartRecording}
-                accessibilityLabel="Start recording"
-                accessibilityRole="button"
-              >
-                <Ionicons name="mic" size={36} color={Colors.surface} />
-              </TouchableOpacity>
-              <View style={styles.micHint}>
-                <Text style={styles.micHintText}>Tap mic to recite</Text>
-              </View>
-            </View>
+            <PreviewControls
+              onRecord={handleStartRecording}
+              onSkip={handleSkip}
+            />
           )
         ) : (
-          /* ── Text input fallback (Expo Go) ── */
-          <View style={styles.textInputArea}>
-            <View style={styles.textInputBanner}>
-              <Ionicons name="information-circle-outline" size={15} color={Colors.primary} />
-              <Text style={styles.textInputBannerText}>
-                Mic unavailable in Expo Go — type your recitation below
-              </Text>
-            </View>
-            <View style={styles.textInputRow}>
-              <TouchableOpacity style={styles.skipBtnSmall} onPress={handleSkip}>
-                <Ionicons name="play-skip-forward-outline" size={20} color={Colors.textMuted} />
-              </TouchableOpacity>
-              <TextInput
-                style={styles.textInput}
-                placeholder="Type verse from memory..."
-                placeholderTextColor={Colors.textLight}
-                value={typedText}
-                onChangeText={setTypedText}
-                multiline
-                returnKeyType="done"
-                blurOnSubmit
-              />
-              <TouchableOpacity
-                style={[styles.submitBtn, !typedText.trim() && styles.submitBtnDisabled]}
-                onPress={() => {
-                  if (!typedText.trim()) return;
-                  handleTranscript(typedText.trim());
-                  setTypedText('');
-                }}
-                disabled={!typedText.trim()}
-              >
-                <Ionicons name="checkmark" size={22} color={Colors.surface} />
-              </TouchableOpacity>
-            </View>
-          </View>
+          <TextInputFallback
+            typedText={typedText}
+            onChangeText={setTypedText}
+            onSubmit={() => {
+              if (!typedText.trim()) return;
+              handleTranscript(typedText.trim());
+              setTypedText('');
+            }}
+            onSkip={handleSkip}
+          />
         )}
       </KeyboardAvoidingView>
     </View>
   );
 }
 
-function StatPill({ label, value, icon }: { label: string; value: string; icon: string }) {
+// ─── Score Card ──────────────────────────────────────────────────────────────
+
+function ScoreCard({
+  score,
+  xpEarned,
+  transcript,
+  verseText,
+}: {
+  score: number;
+  xpEarned: number;
+  transcript: string;
+  verseText: string;
+}) {
+  const tier = getScoreTier(score);
+
   return (
-    <View style={styles.statPill}>
-      <Text style={styles.statPillIcon}>{icon}</Text>
-      <Text style={styles.statPillValue}>{value}</Text>
-      <Text style={styles.statPillLabel}>{label}</Text>
+    <Animated.View
+      entering={SlideInDown.springify().damping(14)}
+      style={[styles.scoreCard, { borderLeftColor: tier.color }]}
+    >
+      <View style={styles.scoreTierRow}>
+        <IconBadge name={tier.icon} color={tier.color} size={24} bgOpacity={0.15} />
+        <View style={styles.scoreValues}>
+          <AnimatedCounter value={score} suffix="%" color={Colors.text} style={styles.scoreValue} />
+          <Title style={{ color: tier.color }}>{tier.label}</Title>
+        </View>
+      </View>
+
+      <View style={styles.xpEarnedRow}>
+        <Ionicons name="flash" size={16} color={Colors.secondary} />
+        <AnimatedCounter value={xpEarned} prefix="+" color={Colors.secondary} delay={200} style={styles.xpEarnedText} />
+        <Caption style={{ color: Colors.secondary }}>XP</Caption>
+      </View>
+
+      {transcript ? (
+        <View style={styles.transcriptBox}>
+          <Overline>You said</Overline>
+          <Body style={styles.transcriptText}>{transcript}</Body>
+        </View>
+      ) : null}
+
+      <View style={styles.fullVerseBox}>
+        <Overline>Verse</Overline>
+        <Body style={styles.fullVerseText}>{verseText}</Body>
+      </View>
+    </Animated.View>
+  );
+}
+
+// ─── Mic Button with Pulse ───────────────────────────────────────────────────
+
+function PreviewControls({ onRecord, onSkip }: { onRecord: () => void; onSkip: () => void }) {
+  const ring1Scale = useSharedValue(1);
+  const ring1Opacity = useSharedValue(0.3);
+  const ring2Scale = useSharedValue(1);
+  const ring2Opacity = useSharedValue(0.3);
+
+  useEffect(() => {
+    ring1Scale.value = withRepeat(
+      withSequence(
+        withTiming(1.5, { duration: 1800, easing: Easing.out(Easing.cubic) }),
+        withTiming(1, { duration: 0 }),
+      ),
+      -1,
+    );
+    ring1Opacity.value = withRepeat(
+      withSequence(
+        withTiming(0, { duration: 1800 }),
+        withTiming(0.3, { duration: 0 }),
+      ),
+      -1,
+    );
+    ring2Scale.value = withDelay(
+      900,
+      withRepeat(
+        withSequence(
+          withTiming(1.5, { duration: 1800, easing: Easing.out(Easing.cubic) }),
+          withTiming(1, { duration: 0 }),
+        ),
+        -1,
+      ),
+    );
+    ring2Opacity.value = withDelay(
+      900,
+      withRepeat(
+        withSequence(
+          withTiming(0, { duration: 1800 }),
+          withTiming(0.3, { duration: 0 }),
+        ),
+        -1,
+      ),
+    );
+  }, []);
+
+  const ring1Style = useAnimatedStyle(() => ({
+    transform: [{ scale: ring1Scale.value }],
+    opacity: ring1Opacity.value,
+  }));
+
+  const ring2Style = useAnimatedStyle(() => ({
+    transform: [{ scale: ring2Scale.value }],
+    opacity: ring2Opacity.value,
+  }));
+
+  const btnScale = useSharedValue(1);
+  const btnStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: btnScale.value }],
+  }));
+
+  return (
+    <View style={styles.micRow}>
+      <Pressable style={styles.skipBtn} onPress={onSkip}>
+        <Ionicons name="play-skip-forward" size={20} color={Colors.textSecondary} />
+      </Pressable>
+
+      <View style={styles.micContainer}>
+        <Animated.View style={[styles.pulseRing, ring1Style]} />
+        <Animated.View style={[styles.pulseRing, ring2Style]} />
+        <AnimatedPressable
+          style={[styles.micBtn, btnStyle]}
+          onPressIn={() => { btnScale.value = withSpring(0.93, { damping: 15 }); }}
+          onPressOut={() => { btnScale.value = withSpring(1, { damping: 15 }); }}
+          onPress={onRecord}
+          accessibilityLabel="Start recording"
+          accessibilityRole="button"
+        >
+          <Ionicons name="mic" size={36} color="#FFFFFF" />
+        </AnimatedPressable>
+      </View>
+
+      <View style={styles.micHint}>
+        <Caption style={{ textAlign: 'center', fontSize: 11 }}>Tap to{'\n'}recite</Caption>
+      </View>
     </View>
   );
 }
+
+// ─── Reciting Controls with Listening Bars ───────────────────────────────────
+
+function ListeningBars() {
+  const bar1 = useSharedValue(12);
+  const bar2 = useSharedValue(18);
+  const bar3 = useSharedValue(8);
+
+  useEffect(() => {
+    const animate = (sv: SharedValue<number>, min: number, max: number, dur: number) => {
+      sv.value = withRepeat(
+        withSequence(
+          withTiming(max, { duration: dur }),
+          withTiming(min, { duration: dur }),
+        ),
+        -1,
+        true,
+      );
+    };
+    animate(bar1, 6, 22, 300);
+    animate(bar2, 8, 26, 250);
+    animate(bar3, 4, 20, 350);
+  }, []);
+
+  const s1 = useAnimatedStyle(() => ({ height: bar1.value }));
+  const s2 = useAnimatedStyle(() => ({ height: bar2.value }));
+  const s3 = useAnimatedStyle(() => ({ height: bar3.value }));
+
+  return (
+    <View style={styles.listeningBars}>
+      <Animated.View style={[styles.bar, s1]} />
+      <Animated.View style={[styles.bar, s2]} />
+      <Animated.View style={[styles.bar, s3]} />
+    </View>
+  );
+}
+
+function RecitingControls({ onRestart, onDone }: { onRestart: () => void; onDone: () => void }) {
+  return (
+    <View style={styles.recitingRow}>
+      <Pressable style={styles.restartBtn} onPress={onRestart}>
+        <Ionicons name="refresh" size={20} color={Colors.textSecondary} />
+        <Caption>Restart</Caption>
+      </Pressable>
+
+      <ListeningBars />
+
+      <Pressable style={styles.doneBtn} onPress={onDone}>
+        <Ionicons name="checkmark-circle" size={22} color="#FFFFFF" />
+        <Title style={{ color: '#FFFFFF', fontSize: 15 }}>Done</Title>
+      </Pressable>
+    </View>
+  );
+}
+
+// ─── Text Input Fallback ─────────────────────────────────────────────────────
+
+function TextInputFallback({
+  typedText,
+  onChangeText,
+  onSubmit,
+  onSkip,
+}: {
+  typedText: string;
+  onChangeText: (t: string) => void;
+  onSubmit: () => void;
+  onSkip: () => void;
+}) {
+  return (
+    <View style={styles.textInputArea}>
+      <View style={styles.textInputBanner}>
+        <Ionicons name="information-circle-outline" size={15} color={Colors.primary} />
+        <Caption style={{ color: Colors.primary, flex: 1 }}>
+          Mic unavailable in Expo Go — type your recitation below
+        </Caption>
+      </View>
+      <View style={styles.textInputRow}>
+        <Pressable style={styles.skipBtnSmall} onPress={onSkip}>
+          <Ionicons name="play-skip-forward" size={18} color={Colors.textSecondary} />
+        </Pressable>
+        <TextInput
+          style={styles.textInput}
+          placeholder="Type verse from memory..."
+          placeholderTextColor={Colors.textTertiary}
+          value={typedText}
+          onChangeText={onChangeText}
+          multiline
+          returnKeyType="done"
+          blurOnSubmit
+        />
+        <Pressable
+          style={[styles.submitBtn, !typedText.trim() && styles.submitBtnDisabled]}
+          onPress={onSubmit}
+          disabled={!typedText.trim()}
+        >
+          <Ionicons name="checkmark" size={22} color="#FFFFFF" />
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
+// ─── Styles ──────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
   container: {
@@ -469,336 +663,328 @@ const styles = StyleSheet.create({
     gap: 16,
     backgroundColor: Colors.background,
   },
-  loadingText: {
-    color: Colors.textMuted,
-    fontSize: 16,
-  },
-  emptyEmoji: { fontSize: 64 },
-  emptyTitle: { fontSize: 24, fontWeight: '800', color: Colors.text },
-  emptyMsg: { fontSize: 15, color: Colors.textMuted, textAlign: 'center' },
-  finishedEmoji: { fontSize: 72 },
-  finishedTitle: { fontSize: 26, fontWeight: '800', color: Colors.text },
-  sessionStats: { flexDirection: 'row', gap: 16 },
-  statPill: {
-    backgroundColor: Colors.surface,
-    borderRadius: 16,
-    padding: 16,
-    alignItems: 'center',
-    gap: 4,
-    minWidth: 100,
-    shadowColor: '#000',
-    shadowOpacity: 0.05,
-    shadowOffset: { width: 0, height: 2 },
-    shadowRadius: 8,
-    elevation: 3,
-  },
-  statPillIcon: { fontSize: 24 },
-  statPillValue: { fontSize: 22, fontWeight: '800', color: Colors.primary },
-  statPillLabel: { fontSize: 12, color: Colors.textMuted, fontWeight: '600' },
-  progressBar: {
-    height: 4,
-    backgroundColor: Colors.divider,
-  },
-  progressFill: {
-    height: '100%',
-    backgroundColor: Colors.primary,
-  },
+
+  // Session row
   sessionRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    gap: 8,
+    paddingHorizontal: Spacing.xl,
+    paddingVertical: Spacing.md,
+    gap: Spacing.sm,
   },
   sessionCounter: {
-    fontSize: 14,
-    color: Colors.textMuted,
-    fontWeight: '600',
     flex: 1,
   },
-  masteryBadge: {
-    backgroundColor: Colors.primary + '18',
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-  },
-  masteryText: {
-    fontSize: 12,
-    color: Colors.primary,
-    fontWeight: '700',
-  },
   xpPill: {
-    backgroundColor: Colors.secondary + '22',
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: Colors.secondaryLight + '44',
+    borderRadius: Radii.sm,
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: 3,
   },
-  xpPillText: {
-    fontSize: 12,
-    color: Colors.secondary,
-    fontWeight: '700',
-  },
+
+  // Scroll
   scrollContent: {
-    padding: 20,
-    paddingBottom: 160,
-    gap: 16,
+    padding: Spacing.xl,
+    paddingBottom: 180,
+    gap: Spacing.lg,
   },
+
+  // Verse card
   card: {
     backgroundColor: Colors.surface,
-    borderRadius: 20,
-    padding: 24,
-    gap: 20,
-    shadowColor: '#000',
-    shadowOpacity: 0.06,
-    shadowOffset: { width: 0, height: 4 },
-    shadowRadius: 16,
-    elevation: 4,
+    borderRadius: Radii.xl,
+    padding: Spacing['2xl'],
+    gap: Spacing.xl,
+    ...Shadows.md,
+  },
+  refContainer: {
+    alignItems: 'center',
+    gap: Spacing.sm,
   },
   reference: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: Colors.primary,
-    textAlign: 'center',
     textTransform: 'uppercase',
-    letterSpacing: 0.5,
+    letterSpacing: 0.8,
+    textAlign: 'center',
   },
+  refAccent: {
+    width: 40,
+    height: 2,
+    backgroundColor: Colors.primaryLight,
+    borderRadius: 1,
+  },
+
+  // Hints
   hintContainer: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 6,
+    gap: 8,
     justifyContent: 'center',
   },
   hintWordWrapper: {
-    minWidth: 24,
+    minWidth: 28,
+  },
+  hintPill: {
+    backgroundColor: Colors.primaryFaint,
+    borderRadius: Radii.sm,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
   },
   hintWord: {
+    fontFamily: Fonts.bold,
     fontSize: 22,
-    fontWeight: '700',
     color: Colors.primary,
-    letterSpacing: 0.5,
+    letterSpacing: 1,
   },
   hintWordRevealed: {
+    fontFamily: Fonts.regular,
     fontSize: 18,
-    fontWeight: '400',
-    color: Colors.text,
-    letterSpacing: 0,
+    color: Colors.textSecondary,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
   },
-  revealPenalty: {
-    fontSize: 12,
-    color: Colors.error,
-    textAlign: 'center',
-  },
-  scoreCard: {
-    borderRadius: 20,
-    padding: 24,
-    gap: 10,
+  revealPenaltyRow: {
+    flexDirection: 'row',
     alignItems: 'center',
-    shadowColor: '#000',
-    shadowOpacity: 0.08,
-    shadowOffset: { width: 0, height: 4 },
-    shadowRadius: 16,
-    elevation: 4,
+    justifyContent: 'center',
+    gap: 6,
   },
-  scoreCardGood: { backgroundColor: Colors.successLight },
-  scoreCardOkay: { backgroundColor: Colors.warningLight },
-  scoreCardBad: { backgroundColor: Colors.errorLight },
-  scoreEmoji: { fontSize: 48 },
-  scoreValue: { fontSize: 48, fontWeight: '800', color: Colors.text },
-  scoreLabel: { fontSize: 16, fontWeight: '600', color: Colors.text },
-  xpEarned: { fontSize: 20, fontWeight: '800', color: Colors.secondary },
+
+  // Score card
+  scoreCard: {
+    backgroundColor: Colors.surface,
+    borderRadius: Radii.xl,
+    padding: Spacing['2xl'],
+    gap: Spacing.md,
+    borderLeftWidth: 4,
+    ...Shadows.md,
+  },
+  scoreTierRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.lg,
+  },
+  scoreValues: {
+    gap: 2,
+  },
+  scoreValue: {
+    fontFamily: Fonts.extraBold,
+    fontSize: 36,
+    letterSpacing: -1,
+  },
+  xpEarnedRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: Colors.secondaryLight + '33',
+    borderRadius: Radii.sm,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: 6,
+    alignSelf: 'flex-start',
+  },
+  xpEarnedText: {
+    fontFamily: Fonts.bold,
+    fontSize: 16,
+  },
   transcriptBox: {
-    width: '100%',
-    backgroundColor: Colors.surface + 'AA',
-    borderRadius: 12,
-    padding: 12,
-    gap: 4,
+    backgroundColor: Colors.divider,
+    borderRadius: Radii.md,
+    padding: Spacing.md,
+    gap: 6,
   },
-  transcriptLabel: { fontSize: 11, color: Colors.textMuted, fontWeight: '700', textTransform: 'uppercase' },
-  transcriptText: { fontSize: 14, color: Colors.text, fontStyle: 'italic' },
+  transcriptText: {
+    fontStyle: 'italic',
+    fontSize: 14,
+  },
   fullVerseBox: {
-    width: '100%',
-    backgroundColor: Colors.surface + 'AA',
-    borderRadius: 12,
-    padding: 12,
-    gap: 4,
+    backgroundColor: Colors.divider,
+    borderRadius: Radii.md,
+    padding: Spacing.md,
+    gap: 6,
   },
-  fullVerseLabel: { fontSize: 11, color: Colors.textMuted, fontWeight: '700', textTransform: 'uppercase' },
-  fullVerseText: { fontSize: 14, color: Colors.text, lineHeight: 22 },
+  fullVerseText: {
+    fontSize: 14,
+    lineHeight: 22,
+  },
+
+  // Error
   errorBanner: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: Spacing.sm,
     backgroundColor: Colors.errorLight,
-    borderRadius: 12,
-    padding: 12,
+    borderRadius: Radii.md,
+    padding: Spacing.md,
   },
-  errorText: { fontSize: 14, color: Colors.error, flex: 1 },
+
+  // Interim transcript
   interimBox: {
-    backgroundColor: Colors.primary + '12',
-    borderRadius: 12,
-    padding: 14,
+    backgroundColor: Colors.primaryFaint,
+    borderRadius: Radii.md,
+    padding: Spacing.md,
     borderWidth: 1,
-    borderColor: Colors.primary + '30',
+    borderColor: Colors.primaryLight + '60',
   },
-  interimText: { fontSize: 15, color: Colors.text, fontStyle: 'italic', lineHeight: 22 },
+  interimText: {
+    fontFamily: Fonts.regular,
+    fontSize: 15,
+    color: Colors.text,
+    fontStyle: 'italic',
+    lineHeight: 22,
+  },
+  blinkingCursor: {
+    color: Colors.primary,
+    fontWeight: '100',
+  },
+
+  // Controls
   controls: {
     position: 'absolute',
     bottom: 0,
     left: 0,
     right: 0,
     backgroundColor: Colors.surface,
-    padding: 20,
+    padding: Spacing.xl,
     paddingBottom: Platform.OS === 'ios' ? 36 : 24,
     borderTopWidth: 1,
-    borderTopColor: Colors.border,
-    shadowColor: '#000',
-    shadowOpacity: 0.08,
-    shadowOffset: { width: 0, height: -4 },
-    shadowRadius: 12,
-    elevation: 8,
+    borderTopColor: Colors.divider,
+    ...Shadows.lg,
   },
-  nextBtn: {
-    backgroundColor: Colors.primary,
-    borderRadius: 16,
-    padding: 18,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 10,
-  },
-  nextBtnText: {
-    fontSize: 17,
-    fontWeight: '800',
-    color: Colors.surface,
-  },
+
+  // Mic
   micRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 20,
+    gap: Spacing.xl,
   },
-  skipBtn: {
-    padding: 14,
-    borderRadius: 14,
-    backgroundColor: Colors.divider,
+  micContainer: {
+    width: 96,
+    height: 96,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pulseRing: {
+    position: 'absolute',
+    width: 96,
+    height: 96,
+    borderRadius: 48,
+    backgroundColor: Colors.primaryLight,
   },
   micBtn: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
+    width: 96,
+    height: 96,
+    borderRadius: 48,
     backgroundColor: Colors.primary,
     alignItems: 'center',
     justifyContent: 'center',
+    ...Shadows.lg,
     shadowColor: Colors.primary,
-    shadowOpacity: 0.4,
-    shadowOffset: { width: 0, height: 6 },
-    shadowRadius: 16,
-    elevation: 8,
   },
+  skipBtn: {
+    padding: Spacing.md,
+    borderRadius: Radii.md,
+    backgroundColor: Colors.divider,
+  },
+  micHint: {
+    width: 60,
+  },
+
+  // Reciting
   recitingRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 16,
+    gap: Spacing.lg,
   },
   restartBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    paddingHorizontal: 24,
-    paddingVertical: 16,
-    borderRadius: 16,
-    borderWidth: 2,
+    paddingHorizontal: Spacing.xl,
+    paddingVertical: Spacing.md,
+    borderRadius: Radii.lg,
+    borderWidth: 1.5,
     borderColor: Colors.border,
     backgroundColor: Colors.surface,
-  },
-  restartBtnText: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: Colors.textMuted,
   },
   doneBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    paddingHorizontal: 32,
-    paddingVertical: 16,
-    borderRadius: 16,
+    paddingHorizontal: Spacing['2xl'],
+    paddingVertical: Spacing.md,
+    borderRadius: Radii.lg,
     backgroundColor: Colors.primary,
+    ...Shadows.md,
     shadowColor: Colors.primary,
-    shadowOpacity: 0.3,
-    shadowOffset: { width: 0, height: 4 },
-    shadowRadius: 12,
-    elevation: 6,
   },
-  doneBtnText: {
-    fontSize: 15,
-    fontWeight: '800',
-    color: Colors.surface,
+  listeningBars: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    height: 28,
   },
-  micHint: {
-    width: 60,
+  bar: {
+    width: 4,
+    backgroundColor: Colors.error,
+    borderRadius: 2,
   },
-  micHintText: {
-    fontSize: 12,
-    color: Colors.textMuted,
-    textAlign: 'center',
+
+  // Finished
+  finishedIcon: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: Colors.successLight,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  primaryBtn: {
-    backgroundColor: Colors.primary,
-    borderRadius: 16,
-    paddingHorizontal: 32,
-    paddingVertical: 16,
+  sessionStats: {
+    flexDirection: 'row',
+    gap: Spacing.md,
   },
-  primaryBtnText: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: Colors.surface,
+  finStatCard: {
+    alignItems: 'center',
+    gap: 6,
+    minWidth: 110,
   },
-  secondaryBtn: {
-    borderWidth: 2,
-    borderColor: Colors.primary,
-    borderRadius: 16,
-    paddingHorizontal: 32,
-    paddingVertical: 16,
+  finStatValue: {
+    fontFamily: Fonts.extraBold,
+    fontSize: 24,
+    letterSpacing: -0.5,
   },
-  secondaryBtnText: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: Colors.primary,
-  },
-  skipBtnSmall: {
-    padding: 10,
-    borderRadius: 12,
-    backgroundColor: Colors.divider,
-  },
-  // ── Text input fallback (Expo Go) ──────────────────────────────────────────
+
+  // Text input fallback
   textInputArea: {
-    gap: 8,
+    gap: Spacing.sm,
   },
   textInputBanner: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    backgroundColor: Colors.primary + '12',
-    borderRadius: 8,
+    backgroundColor: Colors.primaryFaint,
+    borderRadius: Radii.sm,
     paddingHorizontal: 10,
     paddingVertical: 6,
-  },
-  textInputBannerText: {
-    fontSize: 12,
-    color: Colors.primary,
-    flex: 1,
   },
   textInputRow: {
     flexDirection: 'row',
     alignItems: 'flex-end',
-    gap: 8,
+    gap: Spacing.sm,
+  },
+  skipBtnSmall: {
+    padding: 10,
+    borderRadius: Radii.md,
+    backgroundColor: Colors.divider,
   },
   textInput: {
     flex: 1,
+    fontFamily: Fonts.regular,
     backgroundColor: Colors.divider,
-    borderRadius: 14,
+    borderRadius: Radii.md,
     paddingHorizontal: 14,
     paddingVertical: 12,
     fontSize: 15,
@@ -814,6 +1000,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   submitBtnDisabled: {
-    backgroundColor: Colors.textLight,
+    backgroundColor: Colors.textTertiary,
   },
 });

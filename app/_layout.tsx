@@ -3,13 +3,28 @@ import { useEffect, useState } from 'react';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { View, Text, StyleSheet, ActivityIndicator } from 'react-native';
+import {
+  useFonts,
+  Inter_400Regular,
+  Inter_600SemiBold,
+  Inter_700Bold,
+  Inter_800ExtraBold,
+} from '@expo-google-fonts/inter';
 import { initDatabase } from '../lib/db';
 import { seedBibleData } from '../lib/bible';
 import { Colors } from '../constants/Colors';
+import { Fonts } from '../constants/Theme';
 
 export default function RootLayout() {
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const [fontsLoaded] = useFonts({
+    Inter_400Regular,
+    Inter_600SemiBold,
+    Inter_700Bold,
+    Inter_800ExtraBold,
+  });
 
   useEffect(() => {
     async function setup() {
@@ -35,7 +50,7 @@ export default function RootLayout() {
     );
   }
 
-  if (!ready) {
+  if (!ready || !fontsLoaded) {
     return (
       <View style={styles.center}>
         <ActivityIndicator size="large" color={Colors.primary} />
@@ -51,9 +66,10 @@ export default function RootLayout() {
         screenOptions={{
           headerStyle: { backgroundColor: Colors.surface },
           headerTintColor: Colors.text,
-          headerTitleStyle: { fontWeight: '700' },
+          headerTitleStyle: { fontFamily: Fonts.bold, fontWeight: '700' },
           headerShadowVisible: false,
           contentStyle: { backgroundColor: Colors.background },
+          animation: 'slide_from_right',
         }}
       >
         <Stack.Screen name="index" options={{ title: 'memoryVerse', headerShown: false }} />
@@ -77,7 +93,7 @@ const styles = StyleSheet.create({
   },
   loadingText: {
     fontSize: 16,
-    color: Colors.textMuted,
+    color: Colors.textSecondary,
     fontWeight: '500',
   },
   errorTitle: {
@@ -87,7 +103,7 @@ const styles = StyleSheet.create({
   },
   errorMsg: {
     fontSize: 14,
-    color: Colors.textMuted,
+    color: Colors.textSecondary,
     textAlign: 'center',
   },
 });

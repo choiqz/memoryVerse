@@ -1,15 +1,17 @@
 import { useCallback, useState } from 'react';
 import {
   View,
-  Text,
-  TouchableOpacity,
+  Pressable,
   ScrollView,
   StyleSheet,
   Alert,
-  Switch,
 } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { Colors } from '../constants/Colors';
+import { Fonts, Spacing, Radii, Shadows } from '../constants/Theme';
+import { Title, Body, Caption, Overline } from '../components/Typography';
+import { Card } from '../components/Card';
+import { Button } from '../components/Button';
 import { getUserStats, updateSettings } from '../lib/db';
 import type { UserStats } from '../lib/db/schema';
 
@@ -35,97 +37,90 @@ export default function SettingsScreen() {
   }, [passThreshold]);
 
   const thresholdLabel = (t: number) => {
-    if (t >= 95) return 'Strict (≥95%)';
-    if (t >= 85) return 'Standard (≥85%)';
-    if (t >= 70) return 'Lenient (≥70%)';
-    return `Custom (≥${t}%)`;
+    if (t >= 95) return 'Strict';
+    if (t >= 85) return 'Standard';
+    if (t >= 70) return 'Lenient';
+    return 'Custom';
   };
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       {/* Translation */}
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Bible Translation</Text>
+      <Card style={styles.section}>
+        <Title>Bible Translation</Title>
         <View style={styles.optionRow}>
           <View style={[styles.optionChip, styles.optionChipSelected]}>
-            <Text style={[styles.optionText, styles.optionTextSelected]}>KJV</Text>
+            <Caption style={styles.optionTextSelected}>KJV</Caption>
           </View>
           <View style={styles.optionChip}>
-            <Text style={styles.optionText}>NIV (coming soon)</Text>
+            <Caption>NIV (coming soon)</Caption>
           </View>
           <View style={styles.optionChip}>
-            <Text style={styles.optionText}>ESV (coming soon)</Text>
+            <Caption>ESV (coming soon)</Caption>
           </View>
         </View>
-      </View>
+      </Card>
 
       {/* Pass threshold */}
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Pass Threshold</Text>
-        <Text style={styles.sectionSubtitle}>
+      <Card style={styles.section}>
+        <Title>Pass Threshold</Title>
+        <Body color={Colors.textSecondary} style={{ fontSize: 13 }}>
           Minimum similarity score to count a review as successful.
-        </Text>
-        <View style={styles.sliderRow}>
-          <Text style={styles.sliderValue}>{passThreshold}%</Text>
-          <Text style={styles.sliderLabel}>{thresholdLabel(passThreshold)}</Text>
+        </Body>
+        <View style={styles.thresholdDisplay}>
+          <Title style={styles.thresholdValue}>{passThreshold}%</Title>
+          <Caption style={{ color: Colors.primary }}>{thresholdLabel(passThreshold)}</Caption>
         </View>
-        <View style={styles.sliderContainer}>
-          <Text style={styles.sliderMin}>50%</Text>
-          <View style={styles.sliderWrap}>
-            <View
-              style={[
-                styles.sliderFill,
-                { width: `${((passThreshold - 50) / 50) * 100}%` },
-              ]}
-            />
-            {/* Simple discrete buttons instead of slider to avoid the @react-native-community/slider dep */}
-            <View style={styles.discreteSlider}>
-              {[50, 60, 70, 80, 85, 90, 95].map((v) => (
-                <TouchableOpacity
-                  key={v}
-                  style={[styles.discreteBtn, passThreshold === v && styles.discreteBtnSelected]}
-                  onPress={() => setPassThreshold(v)}
-                >
-                  <Text style={[styles.discreteText, passThreshold === v && styles.discreteTextSelected]}>
-                    {v}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          </View>
-          <Text style={styles.sliderMax}>95%</Text>
+        {/* Segmented control */}
+        <View style={styles.segmentedControl}>
+          {[50, 60, 70, 80, 85, 90, 95].map((v) => (
+            <Pressable
+              key={v}
+              style={[styles.segment, passThreshold === v && styles.segmentSelected]}
+              onPress={() => setPassThreshold(v)}
+            >
+              <Caption
+                style={[
+                  styles.segmentText,
+                  passThreshold === v && styles.segmentTextSelected,
+                ]}
+              >
+                {v}
+              </Caption>
+            </Pressable>
+          ))}
         </View>
-      </View>
+      </Card>
 
       {/* Stats */}
       {stats && (
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Account Stats</Text>
+        <Card style={styles.section}>
+          <Title>Account Stats</Title>
           <SettingsRow label="Total XP" value={stats.totalXP.toLocaleString()} />
           <SettingsRow label="Longest Streak" value={`${stats.longestStreak} days`} />
           <SettingsRow label="Verses in Library" value={String(stats.versesLearned)} />
-        </View>
+        </Card>
       )}
 
       {/* SM-2 info */}
-      <View style={styles.infoCard}>
-        <Text style={styles.infoTitle}>How spaced repetition works</Text>
-        <Text style={styles.infoText}>
+      <Card variant="tinted" style={styles.infoSection}>
+        <Title style={{ color: Colors.primary, fontSize: 14 }}>How spaced repetition works</Title>
+        <Body style={styles.infoText}>
           memoryVerse uses the SM-2 algorithm (same as Anki). After each review,
           the next due date is calculated based on your performance.
           {'\n\n'}
-          • 95–100% → Perfect (next review in ~21 days after repeated success){'\n'}
-          • 85–94% → Good{'\n'}
-          • 70–84% → Okay{'\n'}
-          • 50–69% → Hard{'\n'}
-          • &lt;50% → Failed (re-queued immediately)
-        </Text>
-      </View>
+          {'\u2022'} 95{'\u2013'}100% {'\u2192'} Perfect (next review in ~21 days after repeated success){'\n'}
+          {'\u2022'} 85{'\u2013'}94% {'\u2192'} Good{'\n'}
+          {'\u2022'} 70{'\u2013'}84% {'\u2192'} Okay{'\n'}
+          {'\u2022'} 50{'\u2013'}69% {'\u2192'} Hard{'\n'}
+          {'\u2022'} {'<'}50% {'\u2192'} Failed (re-queued immediately)
+        </Body>
+      </Card>
 
-      {/* Save button */}
-      <TouchableOpacity style={styles.saveBtn} onPress={save} disabled={saving}>
-        <Text style={styles.saveBtnText}>{saving ? 'Saving...' : 'Save Settings'}</Text>
-      </TouchableOpacity>
+      {/* Save */}
+      <Button size="lg" onPress={save} loading={saving}>
+        Save Settings
+      </Button>
     </ScrollView>
   );
 }
@@ -133,85 +128,82 @@ export default function SettingsScreen() {
 function SettingsRow({ label, value }: { label: string; value: string }) {
   return (
     <View style={styles.settingsRow}>
-      <Text style={styles.settingsLabel}>{label}</Text>
-      <Text style={styles.settingsValue}>{value}</Text>
+      <Body>{label}</Body>
+      <Caption style={{ fontFamily: Fonts.bold }}>{value}</Caption>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
-  content: { padding: 20, paddingBottom: 40, gap: 16 },
-  section: {
-    backgroundColor: Colors.surface,
-    borderRadius: 16,
-    padding: 16,
-    gap: 12,
-    shadowColor: '#000', shadowOpacity: 0.04,
-    shadowOffset: { width: 0, height: 2 }, shadowRadius: 8, elevation: 2,
-  },
-  sectionTitle: { fontSize: 16, fontWeight: '700', color: Colors.text },
-  sectionSubtitle: { fontSize: 13, color: Colors.textMuted, lineHeight: 18 },
-  optionRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  content: { padding: Spacing.xl, paddingBottom: 40, gap: Spacing.lg },
+
+  section: { gap: Spacing.md },
+
+  optionRow: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm },
   optionChip: {
-    borderRadius: 10,
+    borderRadius: Radii.md,
     paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderWidth: 2,
+    paddingVertical: Spacing.sm,
+    borderWidth: 1.5,
     borderColor: Colors.border,
   },
-  optionChipSelected: { borderColor: Colors.primary, backgroundColor: Colors.primary + '12' },
-  optionText: { fontSize: 14, fontWeight: '600', color: Colors.textMuted },
+  optionChipSelected: {
+    borderColor: Colors.primary,
+    backgroundColor: Colors.primaryFaint,
+  },
   optionTextSelected: { color: Colors.primary },
-  sliderRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  sliderValue: { fontSize: 28, fontWeight: '800', color: Colors.primary, minWidth: 60 },
-  sliderLabel: { fontSize: 14, color: Colors.textMuted, flex: 1 },
-  sliderContainer: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  sliderMin: { fontSize: 12, color: Colors.textLight, width: 30 },
-  sliderMax: { fontSize: 12, color: Colors.textLight, width: 30, textAlign: 'right' },
-  sliderWrap: { flex: 1 },
-  sliderFill: { height: 4, backgroundColor: Colors.primary, borderRadius: 2, marginBottom: 8 },
-  discreteSlider: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  discreteBtn: {
+
+  thresholdDisplay: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: Spacing.sm,
+  },
+  thresholdValue: {
+    fontFamily: Fonts.extraBold,
+    fontSize: 28,
+    color: Colors.primary,
+  },
+
+  segmentedControl: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  segment: {
     paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 10,
-    borderWidth: 2,
+    paddingVertical: Spacing.sm,
+    borderRadius: Radii.sm,
+    borderWidth: 1.5,
     borderColor: Colors.border,
     backgroundColor: Colors.surface,
   },
-  discreteBtnSelected: { borderColor: Colors.primary, backgroundColor: Colors.primary + '12' },
-  discreteText: { fontSize: 14, fontWeight: '600', color: Colors.textMuted },
-  discreteTextSelected: { color: Colors.primary },
+  segmentSelected: {
+    borderColor: Colors.primary,
+    backgroundColor: Colors.primaryFaint,
+  },
+  segmentText: {
+    color: Colors.textSecondary,
+  },
+  segmentTextSelected: {
+    color: Colors.primary,
+    fontFamily: Fonts.bold,
+  },
+
   settingsRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    paddingVertical: 8,
+    alignItems: 'center',
+    paddingVertical: Spacing.sm,
     borderBottomWidth: 1,
     borderBottomColor: Colors.divider,
   },
-  settingsLabel: { fontSize: 14, color: Colors.text },
-  settingsValue: { fontSize: 14, fontWeight: '600', color: Colors.textMuted },
-  infoCard: {
-    backgroundColor: Colors.primary + '10',
-    borderRadius: 16,
-    padding: 16,
-    gap: 8,
-    borderWidth: 1,
-    borderColor: Colors.primary + '25',
+
+  infoSection: {
+    gap: Spacing.sm,
   },
-  infoTitle: { fontSize: 14, fontWeight: '700', color: Colors.primary },
-  infoText: { fontSize: 13, color: Colors.text, lineHeight: 20 },
-  saveBtn: {
-    backgroundColor: Colors.primary,
-    borderRadius: 16,
-    padding: 18,
-    alignItems: 'center',
-    shadowColor: Colors.primary,
-    shadowOpacity: 0.3,
-    shadowOffset: { width: 0, height: 4 },
-    shadowRadius: 12,
-    elevation: 6,
+  infoText: {
+    fontSize: 13,
+    lineHeight: 20,
   },
-  saveBtnText: { fontSize: 16, fontWeight: '800', color: Colors.surface },
 });
