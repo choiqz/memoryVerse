@@ -11,7 +11,7 @@ import {
   Inter_800ExtraBold,
 } from '@expo-google-fonts/inter';
 import { initDatabase } from '../lib/db';
-import { seedBibleData } from '../lib/bible';
+import { seedBibleData, seedPacks } from '../lib/bible';
 import { Colors } from '../constants/Colors';
 import { Fonts } from '../constants/Theme';
 
@@ -31,6 +31,7 @@ export default function RootLayout() {
       try {
         await initDatabase();
         await seedBibleData();
+        await seedPacks();
         setReady(true);
       } catch (err) {
         const msg = err instanceof Error ? err.message : 'Failed to initialize app';

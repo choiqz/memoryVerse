@@ -4,14 +4,13 @@ import Animated, {
   useSharedValue,
   useAnimatedStyle,
   withTiming,
-  withDelay,
   Easing,
   runOnJS,
   type SharedValue,
 } from 'react-native-reanimated';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
-const PARTICLE_COUNT = 50;
+const PARTICLE_COUNT = 30;
 const COLORS = ['#8B5CF6', '#F59E0B', '#22C55E', '#F97316', '#EC4899', '#06B6D4'];
 
 type ParticleConfig = {
@@ -23,22 +22,20 @@ type ParticleConfig = {
   size: number;
   color: string;
   isCircle: boolean;
-  duration: number;
-  delay: number;
+  speedFactor: number;
 };
 
 function generateParticles(): ParticleConfig[] {
   return Array.from({ length: PARTICLE_COUNT }, () => ({
-    startX: Math.random() * SCREEN_WIDTH,
-    startY: -(Math.random() * 60 + 20),
-    endY: SCREEN_HEIGHT + 100,
-    driftX: (Math.random() - 0.5) * 120,
+    startX: SCREEN_WIDTH * 0.3 + Math.random() * SCREEN_WIDTH * 0.4,
+    startY: SCREEN_HEIGHT * 0.15,
+    endY: SCREEN_HEIGHT + 50,
+    driftX: (Math.random() - 0.5) * 200,
     rotation: Math.random() * 720 - 360,
     size: Math.random() * 6 + 6,
     color: COLORS[Math.floor(Math.random() * COLORS.length)],
     isCircle: Math.random() > 0.5,
-    duration: Math.random() * 800 + 1200,
-    delay: Math.random() * 300,
+    speedFactor: 0.75 + Math.random() * 0.5,
   }));
 }
 
@@ -48,12 +45,15 @@ function Particle({ config, trigger }: { config: ParticleConfig; trigger: Shared
       return { opacity: 0 };
     }
 
+    const progress = Math.min(trigger.value / config.speedFactor, 1);
+    const opacity = progress < 0.7 ? 1 : 1 - (progress - 0.7) / 0.3;
+
     return {
-      opacity: 1,
+      opacity,
       transform: [
-        { translateX: config.startX + config.driftX * trigger.value },
-        { translateY: config.startY + (config.endY - config.startY) * trigger.value },
-        { rotate: `${config.rotation * trigger.value}deg` },
+        { translateX: config.startX + config.driftX * progress },
+        { translateY: config.startY + (config.endY - config.startY) * progress },
+        { rotate: `${config.rotation * progress}deg` },
       ],
     };
   });
@@ -79,7 +79,7 @@ export type ConfettiRef = {
 };
 
 export const ConfettiOverlay = forwardRef<ConfettiRef>(function ConfettiOverlay(_, ref) {
-  const [particles] = useState(() => generateParticles());
+  const [particles, setParticles] = useState(() => generateParticles());
   const [visible, setVisible] = useState(false);
   const trigger = useSharedValue(0);
 
@@ -88,11 +88,12 @@ export const ConfettiOverlay = forwardRef<ConfettiRef>(function ConfettiOverlay(
   }, []);
 
   const fire = useCallback(() => {
+    setParticles(generateParticles());
     setVisible(true);
     trigger.value = 0;
     trigger.value = withTiming(1, {
-      duration: 2000,
-      easing: Easing.in(Easing.quad),
+      duration: 1200,
+      easing: Easing.out(Easing.cubic),
     }, (finished) => {
       if (finished) {
         runOnJS(hide)();

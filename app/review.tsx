@@ -135,6 +135,15 @@ export default function ReviewScreen() {
     [currentVerse, revealedCount],
   );
 
+  const advanceState = useCallback((nextIdx: number) => {
+    setCurrentIndex(nextIdx);
+    setPhase('preview');
+    setHints(generateHints(queue[nextIdx].text));
+    setRevealedCount(0);
+    setTypedText('');
+    speech.reset();
+  }, [queue, speech]);
+
   const advanceToNext = useCallback(() => {
     const xp = xpEarned;
     setSessionXP((prev) => prev + xp);
@@ -149,19 +158,11 @@ export default function ReviewScreen() {
     // Card out → in transition
     cardOpacity.value = withTiming(0, { duration: 200 }, (done) => {
       if (done) {
-        runOnJS(setCurrentIndex)(nextIndex);
-        runOnJS(setPhase)('preview');
-        runOnJS(setHints)(generateHints(queue[nextIndex].text));
-        runOnJS(setRevealedCount)(0);
-        runOnJS(resetSpeech)();
-        cardOpacity.value = withSpring(1, { damping: 12, stiffness: 100 });
+        runOnJS(advanceState)(nextIndex);
+        cardOpacity.value = withTiming(1, { duration: 250, easing: Easing.out(Easing.cubic) });
       }
     });
-  }, [currentIndex, queue, xpEarned, cardOpacity, speech]);
-
-  const resetSpeech = useCallback(() => {
-    speech.reset();
-  }, [speech]);
+  }, [currentIndex, queue, xpEarned, cardOpacity, advanceState]);
 
   const revealWord = useCallback(
     (index: number) => {
@@ -272,7 +273,7 @@ export default function ReviewScreen() {
   // ─── Main review UI ────────────────────────────────────────────────────
 
   const verse = currentVerse!;
-  const ref = formatRef(verse.book, verse.chapter, verse.verse);
+  const ref = formatRef(verse.book, verse.chapter, verse.verse, verse.verseEnd);
   const mastery = getMasteryLevel(verse.repetitions, verse.interval);
   const progress = currentIndex / queue.length;
 
@@ -427,7 +428,7 @@ function ScoreCard({
 
   return (
     <Animated.View
-      entering={SlideInDown.springify().damping(14)}
+      entering={SlideInDown.springify().damping(20).stiffness(120)}
       style={[styles.scoreCard, { borderLeftColor: tier.color }]}
     >
       <View style={styles.scoreTierRow}>
@@ -767,12 +768,13 @@ const styles = StyleSheet.create({
     gap: Spacing.lg,
   },
   scoreValues: {
+    flex: 1,
     gap: 2,
   },
   scoreValue: {
     fontFamily: Fonts.extraBold,
-    fontSize: 36,
-    letterSpacing: -1,
+    fontSize: 34,
+    letterSpacing: -0.5,
   },
   xpEarnedRow: {
     flexDirection: 'row',

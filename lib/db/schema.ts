@@ -8,6 +8,7 @@ export const verses = sqliteTable('verses', {
   book: text('book').notNull(),
   chapter: integer('chapter').notNull(),
   verse: integer('verse').notNull(),
+  verseEnd: integer('verse_end'),
   text: text('text').notNull(),
   translation: text('translation').notNull().default('KJV'),
 });
@@ -52,9 +53,35 @@ export const userStats = sqliteTable('user_stats', {
   translation: text('translation').notNull().default('KJV'),
 });
 
+/**
+ * Curated verse packs (e.g., "Youth Group Memory Verses").
+ */
+export const versePacks = sqliteTable('verse_packs', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  slug: text('slug').notNull().unique(),
+  name: text('name').notNull(),
+  description: text('description'),
+  icon: text('icon').notNull().default('book'),
+  verseCount: integer('verse_count').notNull().default(0),
+  translation: text('translation').notNull().default('ESV'),
+  sortOrder: integer('sort_order').notNull().default(0),
+});
+
+/**
+ * Links verses to packs.
+ */
+export const versePackItems = sqliteTable('verse_pack_items', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  packId: integer('pack_id').notNull().references(() => versePacks.id),
+  verseId: integer('verse_id').notNull().references(() => verses.id),
+  sortOrder: integer('sort_order').notNull().default(0),
+});
+
 export type Verse = typeof verses.$inferSelect;
 export type NewVerse = typeof verses.$inferInsert;
 export type UserVerse = typeof userVerses.$inferSelect;
 export type NewUserVerse = typeof userVerses.$inferInsert;
 export type Session = typeof sessions.$inferSelect;
 export type UserStats = typeof userStats.$inferSelect;
+export type VersePack = typeof versePacks.$inferSelect;
+export type VersePackItem = typeof versePackItems.$inferSelect;

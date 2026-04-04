@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
   View,
-  Text,
   Pressable,
   FlatList,
   StyleSheet,
@@ -20,9 +19,12 @@ import * as Haptics from 'expo-haptics';
 import { Colors } from '../constants/Colors';
 import { Fonts, Spacing, Radii, Shadows } from '../constants/Theme';
 import { Title, Body, Caption, Overline } from '../components/Typography';
-import { getAllBooks, getVersesByBook, getVersesByChapter, searchVerses, addVerseToLibrary, isVerseInLibrary } from '../lib/db';
-import type { Verse } from '../lib/db/schema';
+import { getAllBooks, getVersesByBook, getVersesByChapter, searchVerses, addVerseToLibrary, isVerseInLibrary, getVersePacks, getPackAddedCount, addPackToLibrary } from '../lib/db';
+import type { Verse, VersePack } from '../lib/db/schema';
 import { sortBooksByOrder, formatRef } from '../lib/bible';
+import { Card } from '../components/Card';
+import { IconBadge } from '../components/IconBadge';
+import { Button } from '../components/Button';
 
 type Mode = 'books' | 'chapters' | 'verses' | 'search';
 
@@ -40,10 +42,20 @@ export default function AddScreen() {
   const [libraryIds, setLibraryIds] = useState<Set<number>>(new Set());
   const [loading, setLoading] = useState(false);
   const [searchFocused, setSearchFocused] = useState(false);
+  const [packs, setPacks] = useState<VersePack[]>([]);
+  const [packAddedCounts, setPackAddedCounts] = useState<Map<number, number>>(new Map());
 
   useEffect(() => {
     getAllBooks().then((bks) => {
       setBooks(sortBooksByOrder(bks));
+    });
+    getVersePacks().then(async (p) => {
+      setPacks(p);
+      const counts = new Map<number, number>();
+      for (const pack of p) {
+        counts.set(pack.id, await getPackAddedCount(pack.id));
+      }
+      setPackAddedCounts(counts);
     });
   }, []);
 
@@ -94,7 +106,7 @@ export default function AddScreen() {
 
   const toggleVerse = useCallback(async (verse: Verse) => {
     if (libraryIds.has(verse.id)) {
-      Alert.alert('Already Added', `${formatRef(verse.book, verse.chapter, verse.verse)} is already in your library.`);
+      Alert.alert('Already Added', `${formatRef(verse.book, verse.chapter, verse.verse, verse.verseEnd)} is already in your library.`);
       return;
     }
     await addVerseToLibrary(verse.id);
@@ -197,6 +209,28 @@ export default function AddScreen() {
           renderItem={renderBookItem}
           style={styles.list}
           ItemSeparatorComponent={() => <View style={styles.separator} />}
+          ListHeaderComponent={
+            packs.length > 0 ? (
+              <View style={styles.packsSection}>
+                <Title style={styles.sectionTitle}>Verse Packs</Title>
+                {packs.map((pack) => (
+                  <PackCard
+                    key={pack.id}
+                    pack={pack}
+                    addedCount={packAddedCounts.get(pack.id) ?? 0}
+                    onAddAll={async () => {
+                      const added = await addPackToLibrary(pack.id);
+                      const newCount = await getPackAddedCount(pack.id);
+                      setPackAddedCounts((prev) => new Map(prev).set(pack.id, newCount));
+                      Alert.alert('Added!', `${added} verse${added !== 1 ? 's' : ''} added to your library.`);
+                      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                    }}
+                  />
+                ))}
+                <Title style={styles.sectionTitle}>Browse by Book</Title>
+              </View>
+            ) : null
+          }
           ListEmptyComponent={
             <View style={styles.emptyState}>
               <Body color={Colors.textSecondary}>No Bible data loaded.</Body>
@@ -241,6 +275,32 @@ export default function AddScreen() {
   );
 }
 
+function PackCard({ pack, addedCount, onAddAll }: { pack: VersePack; addedCount: number; onAddAll: () => void }) {
+  const allAdded = addedCount >= pack.verseCount;
+  return (
+    <Card style={styles.packCard}>
+      <View style={styles.packHeader}>
+        <IconBadge name={pack.icon as any} color={Colors.primary} size={18} />
+        <View style={{ flex: 1, gap: 2 }}>
+          <Title>{pack.name}</Title>
+          {pack.description ? <Caption>{pack.description}</Caption> : null}
+        </View>
+      </View>
+      <View style={styles.packFooter}>
+        <Caption>{addedCount}/{pack.verseCount} in library  ·  {pack.translation}</Caption>
+        <Button
+          size="sm"
+          variant={allAdded ? 'secondary' : 'primary'}
+          onPress={onAddAll}
+          disabled={allAdded}
+        >
+          {allAdded ? 'All Added' : 'Add All'}
+        </Button>
+      </View>
+    </Card>
+  );
+}
+
 function VerseRow({ verse, inLibrary, onPress }: { verse: Verse; inLibrary: boolean; onPress: () => void }) {
   const bounceScale = useSharedValue(1);
   const bounceStyle = useAnimatedStyle(() => ({
@@ -261,7 +321,7 @@ function VerseRow({ verse, inLibrary, onPress }: { verse: Verse; inLibrary: bool
     <Pressable
       style={[styles.verseItem, inLibrary && styles.verseItemAdded]}
       onPress={handlePress}
-      accessibilityLabel={`${formatRef(verse.book, verse.chapter, verse.verse)} — ${inLibrary ? 'in library' : 'tap to add'}`}
+      accessibilityLabel={`${formatRef(verse.book, verse.chapter, verse.verse, verse.verseEnd)} — ${inLibrary ? 'in library' : 'tap to add'}`}
     >
       <View style={styles.verseContent}>
         <Overline style={{ color: Colors.primary }}>v.{verse.verse}</Overline>
@@ -405,5 +465,28 @@ const styles = StyleSheet.create({
     padding: 40,
     alignItems: 'center',
     gap: Spacing.sm,
+  },
+  packsSection: {
+    paddingBottom: Spacing.sm,
+  },
+  sectionTitle: {
+    paddingHorizontal: Spacing.xl,
+    paddingVertical: Spacing.md,
+    color: Colors.textSecondary,
+  },
+  packCard: {
+    marginHorizontal: Spacing.lg,
+    marginBottom: Spacing.sm,
+    gap: Spacing.md,
+  },
+  packHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.md,
+  },
+  packFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
   },
 });

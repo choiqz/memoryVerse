@@ -1,0 +1,84 @@
+{
+  "slug": "youth-group",
+  "name": "Youth Group Memory Verses",
+  "description": "12 essential verses for youth groups — ESV",
+  "icon": "people",
+  "translation": "ESV",
+  "verses": [
+    {
+      "book": "Hebrews",
+      "chapter": 11,
+      "verse": 1,
+      "text": "Now faith is the assurance of things hoped for, the conviction of things not seen."
+    },
+    {
+      "book": "Matthew",
+      "chapter": 6,
+      "verse": 33,
+      "text": "But seek first the kingdom of God and his righteousness, and all these things will be added to you."
+    },
+    {
+      "book": "1 Corinthians",
+      "chapter": 13,
+      "verse": 13,
+      "text": "So now faith, hope, and love abide, these three; but the greatest of these is love."
+    },
+    {
+      "book": "Colossians",
+      "chapter": 3,
+      "verse": 2,
+      "text": "Set your minds on things that are above, not on things that are on earth."
+    },
+    {
+      "book": "Romans",
+      "chapter": 12,
+      "verse": 2,
+      "text": "Do not be conformed to this world, but be transformed by the renewal of your mind, that by testing you may discern what is the will of God, what is good and acceptable and perfect."
+    },
+    {
+      "book": "Jeremiah",
+      "chapter": 33,
+      "verse": 3,
+      "text": "Call to me and I will answer you, and will tell you great and hidden things that you have not known."
+    },
+    {
+      "book": "Isaiah",
+      "chapter": 41,
+      "verse": 10,
+      "text": "Fear not, for I am with you; be not dismayed, for I am your God; I will strengthen you, I will help you, I will uphold you with my righteous right hand."
+    },
+    {
+      "book": "Philippians",
+      "chapter": 2,
+      "verse": 3,
+      "verse_end": 4,
+      "text": "Do nothing from selfish ambition or conceit, but in humility count others more significant than yourselves. Let each of you look not only to his own interests, but also to the interests of others."
+    },
+    {
+      "book": "Matthew",
+      "chapter": 5,
+      "verse": 13,
+      "text": "You are the salt of the earth, but if salt has lost its taste, how shall its saltiness be restored? It is no longer good for anything except to be thrown out and trampled under people's feet."
+    },
+    {
+      "book": "Colossians",
+      "chapter": 3,
+      "verse": 12,
+      "verse_end": 14,
+      "text": "Put on then, as God's chosen ones, holy and beloved, compassionate hearts, kindness, humility, meekness, and patience, bearing with one another and, if one has a complaint against another, forgiving each other; as the Lord has forgiven you, so you also must forgive. And above all these put on love, which binds everything together in perfect harmony."
+    },
+    {
+      "book": "Ephesians",
+      "chapter": 3,
+      "verse": 17,
+      "verse_end": 19,
+      "text": "so that Christ may dwell in your hearts through faith\u2014that you, being rooted and grounded in love, may have strength to comprehend with all the saints what is the breadth and length and height and depth, and to know the love of Christ that surpasses knowledge, that you may be filled with all the fullness of God."
+    },
+    {
+      "book": "Luke",
+      "chapter": 9,
+      "verse": 23,
+      "text": "And he said to all, \u201cIf anyone would come after me, let him deny himself and take up his cross daily and follow me.\u201d"
+    }
+  ]
+}

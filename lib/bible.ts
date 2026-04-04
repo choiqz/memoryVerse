@@ -2,7 +2,7 @@
  * Bible data loader.
  * Loads bundled KJV JSON and seeds the local SQLite database.
  */
-import { upsertVerses, getAllBooks } from './db';
+import { upsertVerses, getAllBooks, getVersePacks, insertVersePack, upsertVerseWithRange, insertVersePackItem } from './db';
 
 export interface BibleVerse {
   book: string;
@@ -51,9 +51,54 @@ export async function seedBibleData(): Promise<void> {
 }
 
 /**
- * Format a verse reference: "John 3:16"
+ * Seed verse packs from bundled JSON files.
+ * Only runs if no packs exist yet.
  */
-export function formatRef(book: string, chapter: number, verse: number): string {
+export async function seedPacks(): Promise<void> {
+  const existingPacks = await getVersePacks();
+  if (existingPacks.length > 0) return;
+
+  const packFiles = [
+    require('../assets/packs/youth-group.json'),
+  ];
+
+  for (const packData of packFiles) {
+    const packId = await insertVersePack({
+      slug: packData.slug,
+      name: packData.name,
+      description: packData.description,
+      icon: packData.icon,
+      verseCount: packData.verses.length,
+      translation: packData.translation,
+    });
+
+    for (let i = 0; i < packData.verses.length; i++) {
+      const v = packData.verses[i];
+      const verseId = await upsertVerseWithRange({
+        book: v.book,
+        chapter: v.chapter,
+        verse: v.verse,
+        verseEnd: v.verse_end ?? null,
+        text: v.text,
+        translation: packData.translation,
+      });
+
+      await insertVersePackItem({
+        packId,
+        verseId,
+        sortOrder: i,
+      });
+    }
+  }
+}
+
+/**
+ * Format a verse reference: "John 3:16" or "Philippians 2:3-4"
+ */
+export function formatRef(book: string, chapter: number, verse: number, verseEnd?: number | null): string {
+  if (verseEnd && verseEnd > verse) {
+    return `${book} ${chapter}:${verse}-${verseEnd}`;
+  }
   return `${book} ${chapter}:${verse}`;
 }
 

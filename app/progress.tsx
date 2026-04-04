@@ -176,7 +176,7 @@ export default function ProgressScreen() {
                 <View key={uv.id} style={styles.libraryItem}>
                   <View style={styles.libraryItemLeft}>
                     <Overline style={{ color: Colors.primary }}>
-                      {formatRef(uv.book, uv.chapter, uv.verse)}
+                      {formatRef(uv.book, uv.chapter, uv.verse, uv.verseEnd)}
                     </Overline>
                     <Caption numberOfLines={2}>{uv.text}</Caption>
                   </View>

@@ -1,8 +1,8 @@
 import * as SQLite from 'expo-sqlite';
 import { drizzle } from 'drizzle-orm/expo-sqlite';
 import { eq, lte, sql, and } from 'drizzle-orm';
-import { verses, userVerses, sessions, userStats } from './schema';
-import type { Verse, UserVerse, UserStats } from './schema';
+import { verses, userVerses, sessions, userStats, versePacks, versePackItems } from './schema';
+import type { Verse, UserVerse, UserStats, VersePack } from './schema';
 import { sm2, initialCard, isDue, similarityToQuality, calculateXP } from '../srs';
 
 // ─── Database Connection ──────────────────────────────────────────────────────
@@ -21,6 +21,7 @@ export async function initDatabase(): Promise<void> {
       book TEXT NOT NULL,
       chapter INTEGER NOT NULL,
       verse INTEGER NOT NULL,
+      verse_end INTEGER,
       text TEXT NOT NULL,
       translation TEXT NOT NULL DEFAULT 'KJV'
     );
@@ -56,14 +57,43 @@ export async function initDatabase(): Promise<void> {
       translation TEXT NOT NULL DEFAULT 'KJV'
     );
 
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_verses_ref
-      ON verses(book, chapter, verse, translation);
+    CREATE TABLE IF NOT EXISTS verse_packs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      slug TEXT NOT NULL UNIQUE,
+      name TEXT NOT NULL,
+      description TEXT,
+      icon TEXT NOT NULL DEFAULT 'book',
+      verse_count INTEGER NOT NULL DEFAULT 0,
+      translation TEXT NOT NULL DEFAULT 'ESV',
+      sort_order INTEGER NOT NULL DEFAULT 0
+    );
+
+    CREATE TABLE IF NOT EXISTS verse_pack_items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      pack_id INTEGER NOT NULL REFERENCES verse_packs(id),
+      verse_id INTEGER NOT NULL REFERENCES verses(id),
+      sort_order INTEGER NOT NULL DEFAULT 0
+    );
 
     CREATE INDEX IF NOT EXISTS idx_user_verses_due
       ON user_verses(due_date);
 
     -- Seed user_stats row if missing
     INSERT OR IGNORE INTO user_stats (id) VALUES (1);
+  `);
+
+  // Add verse_end column for existing databases (idempotent)
+  try {
+    await sqliteDb.execAsync(`ALTER TABLE verses ADD COLUMN verse_end INTEGER`);
+  } catch {
+    // Column already exists
+  }
+
+  // Recreate index to include verse_end (safe for fresh + existing DBs)
+  await sqliteDb.execAsync(`
+    DROP INDEX IF EXISTS idx_verses_ref;
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_verses_ref
+      ON verses(book, chapter, verse, COALESCE(verse_end, 0), translation);
   `);
 }
 
@@ -85,6 +115,43 @@ export async function upsertVerses(verseList: Array<{
       translation: v.translation ?? 'KJV',
     }).onConflictDoNothing();
   }
+}
+
+export async function upsertVerseWithRange(v: {
+  book: string;
+  chapter: number;
+  verse: number;
+  verseEnd: number | null;
+  text: string;
+  translation: string;
+}): Promise<number> {
+  const existing = await db
+    .select({ id: verses.id })
+    .from(verses)
+    .where(
+      and(
+        eq(verses.book, v.book),
+        eq(verses.chapter, v.chapter),
+        eq(verses.verse, v.verse),
+        eq(verses.translation, v.translation),
+        v.verseEnd
+          ? eq(verses.verseEnd, v.verseEnd)
+          : sql`${verses.verseEnd} IS NULL`,
+      )
+    )
+    .get();
+
+  if (existing) return existing.id;
+
+  const result = await db.insert(verses).values({
+    book: v.book,
+    chapter: v.chapter,
+    verse: v.verse,
+    verseEnd: v.verseEnd,
+    text: v.text,
+    translation: v.translation,
+  });
+  return Number(result.lastInsertRowId);
 }
 
 export async function getVersesByBook(book: string): Promise<Verse[]> {
@@ -182,6 +249,7 @@ export async function getDueVerses(): Promise<Array<UserVerse & Verse>> {
       book: verses.book,
       chapter: verses.chapter,
       verse: verses.verse,
+      verseEnd: verses.verseEnd,
       text: verses.text,
       translation: verses.translation,
     })
@@ -210,6 +278,7 @@ export async function getAllUserVerses(): Promise<Array<UserVerse & Verse>> {
       book: verses.book,
       chapter: verses.chapter,
       verse: verses.verse,
+      verseEnd: verses.verseEnd,
       text: verses.text,
       translation: verses.translation,
     })
@@ -362,4 +431,84 @@ export async function getDueCount(): Promise<number> {
     .where(lte(userVerses.dueDate, today))
     .get();
   return result?.count ?? 0;
+}
+
+// ─── Verse Packs ─────────────────────────────────────────────────────────────
+
+export async function getVersePacks(): Promise<VersePack[]> {
+  return db.select().from(versePacks).orderBy(versePacks.sortOrder).all();
+}
+
+export async function getPackVerses(packId: number): Promise<Verse[]> {
+  return db
+    .select({
+      id: verses.id,
+      book: verses.book,
+      chapter: verses.chapter,
+      verse: verses.verse,
+      verseEnd: verses.verseEnd,
+      text: verses.text,
+      translation: verses.translation,
+    })
+    .from(versePackItems)
+    .innerJoin(verses, eq(versePackItems.verseId, verses.id))
+    .where(eq(versePackItems.packId, packId))
+    .orderBy(versePackItems.sortOrder)
+    .all();
+}
+
+export async function getPackAddedCount(packId: number): Promise<number> {
+  const rows = await db
+    .select({ count: sql<number>`count(*)` })
+    .from(versePackItems)
+    .innerJoin(userVerses, eq(versePackItems.verseId, userVerses.verseId))
+    .where(eq(versePackItems.packId, packId))
+    .get();
+  return rows?.count ?? 0;
+}
+
+export async function addPackToLibrary(packId: number): Promise<number> {
+  const packVerses = await getPackVerses(packId);
+  let added = 0;
+  for (const v of packVerses) {
+    const existing = await db
+      .select()
+      .from(userVerses)
+      .where(eq(userVerses.verseId, v.id))
+      .get();
+    if (!existing) {
+      await addVerseToLibrary(v.id);
+      added++;
+    }
+  }
+  return added;
+}
+
+export async function insertVersePack(pack: {
+  slug: string;
+  name: string;
+  description?: string;
+  icon: string;
+  verseCount: number;
+  translation: string;
+  sortOrder?: number;
+}): Promise<number> {
+  const result = await db.insert(versePacks).values({
+    slug: pack.slug,
+    name: pack.name,
+    description: pack.description ?? null,
+    icon: pack.icon,
+    verseCount: pack.verseCount,
+    translation: pack.translation,
+    sortOrder: pack.sortOrder ?? 0,
+  });
+  return Number(result.lastInsertRowId);
+}
+
+export async function insertVersePackItem(item: {
+  packId: number;
+  verseId: number;
+  sortOrder: number;
+}): Promise<void> {
+  await db.insert(versePackItems).values(item);
 }
