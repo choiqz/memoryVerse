@@ -26,6 +26,7 @@
         "backgroundColor": "#7C3AED"
       },
       "package": "com.memoryverse.app",
+      "allowBackup": true,
       "permissions": [
         "android.permission.RECORD_AUDIO"
       ]

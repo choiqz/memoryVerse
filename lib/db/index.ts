@@ -524,3 +524,172 @@ export async function insertVersePackItem(item: {
 }): Promise<void> {
   await db.insert(versePackItems).values(item);
 }
+
+// ─── Backup / Restore ────────────────────────────────────────────────────────
+
+export interface BackupData {
+  app: 'memoryVerse';
+  schemaVersion: 1;
+  exportedAt: string;
+  stats: {
+    streak: number;
+    longestStreak: number;
+    lastReviewDate: string | null;
+    dailyGoal: number;
+    passThreshold: number;
+  };
+  verses: Array<{
+    book: string;
+    chapter: number;
+    verse: number;
+    verseEnd: number | null;
+    text: string;
+    translation: string;
+    interval: number;
+    easeFactor: number;
+    dueDate: string;
+    repetitions: number;
+    lastScore: number;
+    addedAt: string;
+  }>;
+  sessions: Array<{ date: string; versesReviewed: number }>;
+}
+
+/**
+ * Serialize the user's progress (library, SRS state, stats, activity).
+ * Verse text is embedded so a backup restores even on an install whose
+ * bundled data differs. No transcripts or audio are ever stored.
+ */
+export async function exportBackup(): Promise<BackupData> {
+  const stats = await getUserStats();
+  const library = await getAllUserVerses();
+  const allSessions = await db
+    .select({ date: sessions.date, versesReviewed: sessions.versesReviewed })
+    .from(sessions)
+    .orderBy(sessions.date)
+    .all();
+
+  return {
+    app: 'memoryVerse',
+    schemaVersion: 1,
+    exportedAt: new Date().toISOString(),
+    stats: {
+      streak: stats.streak,
+      longestStreak: stats.longestStreak,
+      lastReviewDate: stats.lastReviewDate,
+      dailyGoal: stats.dailyGoal,
+      passThreshold: stats.passThreshold,
+    },
+    verses: library.map((uv) => ({
+      book: uv.book,
+      chapter: uv.chapter,
+      verse: uv.verse,
+      verseEnd: uv.verseEnd,
+      text: uv.text,
+      translation: uv.translation,
+      interval: uv.interval,
+      easeFactor: uv.easeFactor,
+      dueDate: uv.dueDate,
+      repetitions: uv.repetitions,
+      lastScore: uv.lastScore,
+      addedAt: uv.addedAt,
+    })),
+    sessions: allSessions,
+  };
+}
+
+/**
+ * Merge a backup into the current database:
+ * - Verses are matched by reference + translation (created if missing);
+ *   the backup's SRS state replaces any existing progress on the same verse.
+ * - Session history merges by date, keeping the higher count.
+ * - Streak comes from whichever side reviewed most recently.
+ * Returns the number of verses restored.
+ */
+export async function importBackup(data: BackupData): Promise<number> {
+  let imported = 0;
+
+  for (const v of data.verses) {
+    const verseId = await upsertVerseWithRange({
+      book: v.book,
+      chapter: v.chapter,
+      verse: v.verse,
+      verseEnd: v.verseEnd ?? null,
+      text: v.text,
+      translation: v.translation,
+    });
+
+    const srsState = {
+      interval: v.interval,
+      easeFactor: v.easeFactor,
+      dueDate: v.dueDate,
+      repetitions: v.repetitions,
+      lastScore: v.lastScore,
+      addedAt: v.addedAt,
+    };
+
+    const existing = await db
+      .select({ id: userVerses.id })
+      .from(userVerses)
+      .where(eq(userVerses.verseId, verseId))
+      .get();
+
+    if (existing) {
+      await db.update(userVerses).set(srsState).where(eq(userVerses.id, existing.id));
+    } else {
+      await db.insert(userVerses).values({ verseId, ...srsState });
+    }
+    imported++;
+  }
+
+  for (const s of data.sessions) {
+    const existing = await db
+      .select()
+      .from(sessions)
+      .where(eq(sessions.date, s.date))
+      .get();
+    if (existing) {
+      if (s.versesReviewed > existing.versesReviewed) {
+        await db
+          .update(sessions)
+          .set({ versesReviewed: s.versesReviewed })
+          .where(eq(sessions.date, s.date));
+      }
+    } else {
+      await db.insert(sessions).values({
+        date: s.date,
+        versesReviewed: s.versesReviewed,
+        createdAt: new Date().toISOString(),
+      });
+    }
+  }
+
+  const current = await getUserStats();
+  const importedDate = data.stats.lastReviewDate ?? '';
+  const currentDate = current.lastReviewDate ?? '';
+  const streak =
+    importedDate === currentDate
+      ? Math.max(current.streak, data.stats.streak)
+      : importedDate > currentDate
+        ? data.stats.streak
+        : current.streak;
+
+  const libraryCount = await db
+    .select({ count: sql<number>`count(*)` })
+    .from(userVerses)
+    .get();
+
+  await db
+    .update(userStats)
+    .set({
+      versesLearned: libraryCount?.count ?? 0,
+      streak,
+      longestStreak: Math.max(current.longestStreak, data.stats.longestStreak),
+      lastReviewDate: importedDate > currentDate ? importedDate : current.lastReviewDate,
+      dailyGoal: data.stats.dailyGoal,
+      passThreshold: data.stats.passThreshold,
+    })
+    .where(eq(userStats.id, 1));
+
+  return imported;
+}

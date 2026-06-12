@@ -11,12 +11,15 @@ import {
 import { useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import Constants from 'expo-constants';
+import * as FileSystem from 'expo-file-system/legacy';
+import * as Sharing from 'expo-sharing';
+import * as DocumentPicker from 'expo-document-picker';
 import { Colors } from '../constants/Colors';
 import { Fonts, Spacing, Radii, Shadows } from '../constants/Theme';
 import { Title, Body, Caption, Overline } from '../components/Typography';
 import { Card } from '../components/Card';
 import { Button } from '../components/Button';
-import { getUserStats, updateSettings } from '../lib/db';
+import { getUserStats, updateSettings, exportBackup, importBackup, type BackupData } from '../lib/db';
 import type { UserStats } from '../lib/db/schema';
 
 const FEEDBACK_EMAIL = 'jeongwanc@gmail.com';
@@ -43,6 +46,76 @@ export default function SettingsScreen() {
     setSaving(false);
     Alert.alert('Saved', 'Settings updated.');
   }, [passThreshold, dailyGoal]);
+
+  const refreshStats = useCallback(async () => {
+    const s = await getUserStats();
+    setStats(s);
+    setPassThreshold(s.passThreshold);
+    setDailyGoal(s.dailyGoal);
+  }, []);
+
+  const handleExport = useCallback(async () => {
+    try {
+      const data = await exportBackup();
+      if (data.verses.length === 0) {
+        Alert.alert('Nothing to export', 'Add some verses first — your library is empty.');
+        return;
+      }
+      const date = new Date().toISOString().split('T')[0];
+      const uri = `${FileSystem.cacheDirectory}memoryverse-backup-${date}.json`;
+      await FileSystem.writeAsStringAsync(uri, JSON.stringify(data, null, 2));
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(uri, {
+          mimeType: 'application/json',
+          dialogTitle: 'Save your memoryVerse backup',
+        });
+      } else {
+        Alert.alert('Sharing unavailable', `Backup written to ${uri}`);
+      }
+    } catch (e) {
+      Alert.alert('Export failed', e instanceof Error ? e.message : 'Unknown error');
+    }
+  }, []);
+
+  const handleImport = useCallback(async () => {
+    try {
+      const picked = await DocumentPicker.getDocumentAsync({
+        type: ['application/json', 'text/plain', 'application/octet-stream'],
+        copyToCacheDirectory: true,
+      });
+      if (picked.canceled || !picked.assets?.[0]) return;
+
+      const raw = await FileSystem.readAsStringAsync(picked.assets[0].uri);
+      const data = JSON.parse(raw) as BackupData;
+      if (data?.app !== 'memoryVerse' || data?.schemaVersion !== 1 || !Array.isArray(data.verses)) {
+        Alert.alert('Invalid backup', 'This file doesn’t look like a memoryVerse backup.');
+        return;
+      }
+
+      Alert.alert(
+        'Import Backup',
+        `Restore ${data.verses.length} verse${data.verses.length !== 1 ? 's' : ''} from ${data.exportedAt.split('T')[0]}? ` +
+        'Progress in the backup replaces your current progress on the same verses.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Import',
+            onPress: async () => {
+              try {
+                const n = await importBackup(data);
+                await refreshStats();
+                Alert.alert('Imported', `${n} verse${n !== 1 ? 's' : ''} restored.`);
+              } catch (e) {
+                Alert.alert('Import failed', e instanceof Error ? e.message : 'Unknown error');
+              }
+            },
+          },
+        ],
+      );
+    } catch (e) {
+      Alert.alert('Import failed', e instanceof Error ? e.message : 'Could not read that file.');
+    }
+  }, [refreshStats]);
 
   const sendFeedback = useCallback(async () => {
     const version = Constants.expoConfig?.version ?? '1.0.0';
@@ -154,24 +227,36 @@ export default function SettingsScreen() {
         </Card>
       )}
 
+      {/* Backup & Restore */}
+      <Card style={styles.section}>
+        <Title>Backup &amp; Restore</Title>
+        <Caption color={Colors.textTertiary}>
+          Your progress is included in your phone's own iCloud or Google backup.
+          Export a file for extra safety or to move to a new device.
+        </Caption>
+        <ActionRow
+          icon="cloud-upload"
+          label="Export Progress"
+          caption="Save your library, scores, and streaks to a file."
+          onPress={handleExport}
+        />
+        <ActionRow
+          icon="cloud-download"
+          label="Import Progress"
+          caption="Restore from a previously exported backup file."
+          onPress={handleImport}
+        />
+      </Card>
+
       {/* Feedback */}
       <Card style={styles.section}>
         <Title>Feedback</Title>
-        <Pressable
-          style={styles.feedbackRow}
+        <ActionRow
+          icon="chatbubble-ellipses"
+          label="Send Feedback"
+          caption="Found a bug or have an idea? Email us."
           onPress={sendFeedback}
-          accessibilityRole="button"
-          accessibilityLabel="Send feedback by email"
-        >
-          <View style={styles.feedbackIcon}>
-            <Ionicons name="chatbubble-ellipses" size={18} color={Colors.primary} />
-          </View>
-          <View style={{ flex: 1, gap: 2 }}>
-            <Body style={{ fontFamily: Fonts.semiBold }}>Send Feedback</Body>
-            <Caption>Found a bug or have an idea? Email us.</Caption>
-          </View>
-          <Ionicons name="chevron-forward" size={16} color={Colors.textTertiary} />
-        </Pressable>
+        />
       </Card>
 
       {/* SM-2 info */}
@@ -192,6 +277,36 @@ export default function SettingsScreen() {
         Save Settings
       </Button>
     </ScrollView>
+  );
+}
+
+function ActionRow({
+  icon,
+  label,
+  caption,
+  onPress,
+}: {
+  icon: keyof typeof Ionicons.glyphMap;
+  label: string;
+  caption: string;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      style={styles.feedbackRow}
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+    >
+      <View style={styles.feedbackIcon}>
+        <Ionicons name={icon} size={18} color={Colors.primary} />
+      </View>
+      <View style={{ flex: 1, gap: 2 }}>
+        <Body style={{ fontFamily: Fonts.semiBold }}>{label}</Body>
+        <Caption>{caption}</Caption>
+      </View>
+      <Ionicons name="chevron-forward" size={16} color={Colors.textTertiary} />
+    </Pressable>
   );
 }
 
