@@ -1,6 +1,6 @@
 /**
  * Text similarity scoring for Bible verse recitation.
- * Handles archaic language (thee, thou, hath), proper nouns, and partial credit.
+ * Handles speech-recognition noise, proper nouns, and partial credit.
  */
 
 /**
@@ -13,7 +13,7 @@
 export function normalizeText(text: string): string {
   return text
     .toLowerCase()
-    // Expand common KJV contractions
+    // Expand common contractions
     .replace(/\bsha'n't\b/g, 'shall not')
     .replace(/\bshan't\b/g, 'shall not')
     .replace(/\bwon't\b/g, 'will not')
@@ -31,18 +31,12 @@ export function normalizeText(text: string): string {
     .replace(/\bwouldn't\b/g, 'would not')
     .replace(/\bcouldn't\b/g, 'could not')
     .replace(/\bshouldn't\b/g, 'should not')
-    // KJV-specific: speech recognition often mishears these
+    // Archaic pronouns (exact-word mappings; harmless for modern text,
+    // helps if speech recognition outputs archaic forms)
     .replace(/\bthee\b/g, 'you')
     .replace(/\bthou\b/g, 'you')
     .replace(/\bthy\b/g, 'your')
     .replace(/\bthine\b/g, 'yours')
-    .replace(/\byea\b/g, 'yes')
-    .replace(/\bseeketh\b/g, 'seeks')
-    .replace(/\bspeaketh\b/g, 'speaks')
-    // Normalize -eth endings: "hath" -> "has", "loveth" -> "loves", etc.
-    .replace(/\b(\w+)eth\b/g, (_match, root) => root + 's')
-    // Normalize -est endings: "knowest" -> "know"
-    .replace(/\b(\w+)est\b/g, (_match, root) => root)
     // Remove punctuation
     .replace(/[^\w\s]/g, ' ')
     // Collapse whitespace
@@ -98,9 +92,11 @@ export function wordSimilarity(a: string, b: string): number {
 /**
  * Score recitation similarity against the target verse (0–100).
  *
- * Uses word-by-word fuzzy matching with a 0.75 similarity threshold.
- * Each target word that has a sufficiently similar match in the recognized text
- * counts as matched. Order is not strictly enforced (greedy matching).
+ * Order-aware fuzzy alignment (LCS-style dynamic programming): target and
+ * recognized words are aligned in sequence, with per-word partial credit for
+ * near matches (>= 0.75 Levenshtein similarity, tolerating speech-recognition
+ * errors). Out-of-order words break the alignment and lose credit, and a mild
+ * penalty is applied when the recitation runs longer than the target.
  */
 export function scoreSimilarity(
   recognized: string,
@@ -120,31 +116,28 @@ export function scoreSimilarity(
   if (targetWords.length === 0) return 100;
   if (recognizedWords.length === 0) return 0;
 
-  // Greedy word matching: for each target word, find the best unmatched recognized word
-  const usedIndices = new Set<number>();
-  let matchCount = 0;
+  // dp[i][j] = best total match weight aligning targetWords[0..i) with recognizedWords[0..j)
+  const T = targetWords.length;
+  const R = recognizedWords.length;
+  const dp: number[][] = Array.from({ length: T + 1 }, () => new Array<number>(R + 1).fill(0));
 
-  for (const targetWord of targetWords) {
-    let bestSim = 0;
-    let bestIdx = -1;
-
-    for (let i = 0; i < recognizedWords.length; i++) {
-      if (usedIndices.has(i)) continue;
-      const sim = wordSimilarity(targetWord, recognizedWords[i]);
-      if (sim > bestSim) {
-        bestSim = sim;
-        bestIdx = i;
-      }
-    }
-
-    if (bestSim >= wordMatchThreshold && bestIdx !== -1) {
-      usedIndices.add(bestIdx);
-      // Partial credit proportional to similarity
-      matchCount += bestSim;
+  for (let i = 1; i <= T; i++) {
+    for (let j = 1; j <= R; j++) {
+      const sim = wordSimilarity(targetWords[i - 1], recognizedWords[j - 1]);
+      const matched = sim >= wordMatchThreshold ? dp[i - 1][j - 1] + sim : 0;
+      dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1], matched);
     }
   }
 
-  return Math.round((matchCount / targetWords.length) * 100);
+  const matchWeight = dp[T][R];
+  const coverage = matchWeight / T;
+
+  // Mild penalty for recitations longer than the target (half-weight per excess
+  // word, so a couple of ASR filler words barely matter but rambling does).
+  const excess = Math.max(0, R - T);
+  const lengthPenalty = T / (T + 0.5 * excess);
+
+  return Math.round(coverage * lengthPenalty * 100);
 }
 
 /**

@@ -3,7 +3,7 @@ import { drizzle } from 'drizzle-orm/expo-sqlite';
 import { eq, lte, sql, and } from 'drizzle-orm';
 import { verses, userVerses, sessions, userStats, versePacks, versePackItems } from './schema';
 import type { Verse, UserVerse, UserStats, VersePack } from './schema';
-import { sm2, initialCard, isDue, similarityToQuality, calculateXP } from '../srs';
+import { sm2, initialCard, isDue, similarityToQuality, nextStreak, getMasteryLevel, type MasteryLevel } from '../srs';
 
 // ─── Database Connection ──────────────────────────────────────────────────────
 
@@ -23,7 +23,7 @@ export async function initDatabase(): Promise<void> {
       verse INTEGER NOT NULL,
       verse_end INTEGER,
       text TEXT NOT NULL,
-      translation TEXT NOT NULL DEFAULT 'KJV'
+      translation TEXT NOT NULL DEFAULT 'BSB'
     );
 
     CREATE TABLE IF NOT EXISTS user_verses (
@@ -41,7 +41,6 @@ export async function initDatabase(): Promise<void> {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       date TEXT NOT NULL,
       verses_reviewed INTEGER NOT NULL DEFAULT 0,
-      xp_earned INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL
     );
 
@@ -49,12 +48,11 @@ export async function initDatabase(): Promise<void> {
       id INTEGER PRIMARY KEY DEFAULT 1,
       streak INTEGER NOT NULL DEFAULT 0,
       longest_streak INTEGER NOT NULL DEFAULT 0,
-      total_xp INTEGER NOT NULL DEFAULT 0,
       verses_learned INTEGER NOT NULL DEFAULT 0,
       last_review_date TEXT,
       daily_goal INTEGER NOT NULL DEFAULT 10,
       pass_threshold INTEGER NOT NULL DEFAULT 85,
-      translation TEXT NOT NULL DEFAULT 'KJV'
+      translation TEXT NOT NULL DEFAULT 'BSB'
     );
 
     CREATE TABLE IF NOT EXISTS verse_packs (
@@ -64,7 +62,7 @@ export async function initDatabase(): Promise<void> {
       description TEXT,
       icon TEXT NOT NULL DEFAULT 'book',
       verse_count INTEGER NOT NULL DEFAULT 0,
-      translation TEXT NOT NULL DEFAULT 'ESV',
+      translation TEXT NOT NULL DEFAULT 'BSB',
       sort_order INTEGER NOT NULL DEFAULT 0
     );
 
@@ -112,7 +110,7 @@ export async function upsertVerses(verseList: Array<{
       chapter: v.chapter,
       verse: v.verse,
       text: v.text,
-      translation: v.translation ?? 'KJV',
+      translation: v.translation ?? 'BSB',
     }).onConflictDoNothing();
   }
 }
@@ -256,6 +254,7 @@ export async function getDueVerses(): Promise<Array<UserVerse & Verse>> {
     .from(userVerses)
     .innerJoin(verses, eq(userVerses.verseId, verses.id))
     .where(lte(userVerses.dueDate, today))
+    .orderBy(userVerses.dueDate)
     .all();
 
   return rows as Array<UserVerse & Verse>;
@@ -291,13 +290,22 @@ export async function getAllUserVerses(): Promise<Array<UserVerse & Verse>> {
 
 // ─── Review / SRS Update ─────────────────────────────────────────────────────
 
+export interface ReviewResult {
+  quality: number;
+  passed: boolean;
+  masteryBefore: MasteryLevel;
+  masteryAfter: MasteryLevel;
+  streak: number;
+}
+
 /**
- * Record a review result: update SRS state, award XP, update streak.
+ * Record a review result: update SRS state and streak.
+ * Quality is derived from the similarity score using the user's pass threshold.
  */
 export async function recordReview(
   userVerseId: number,
   similarityScore: number,  // 0–100
-): Promise<{ xpEarned: number; quality: number }> {
+): Promise<ReviewResult> {
   const uv = await db
     .select()
     .from(userVerses)
@@ -306,8 +314,9 @@ export async function recordReview(
 
   if (!uv) throw new Error(`UserVerse ${userVerseId} not found`);
 
-  const quality = similarityToQuality(similarityScore);
-  const xpEarned = calculateXP(quality);
+  const stats = await getUserStats();
+  const quality = similarityToQuality(similarityScore, stats.passThreshold);
+  const masteryBefore = getMasteryLevel(uv.repetitions, uv.interval);
 
   const result = sm2(quality, {
     interval: uv.interval,
@@ -315,6 +324,8 @@ export async function recordReview(
     repetitions: uv.repetitions,
     dueDate: uv.dueDate,
   });
+
+  const masteryAfter = getMasteryLevel(result.repetitions, result.interval);
 
   // Update user_verse SRS state
   await db
@@ -328,43 +339,33 @@ export async function recordReview(
     })
     .where(eq(userVerses.id, userVerseId));
 
-  // Update user stats: XP and streak
-  await updateStreakAndXP(xpEarned);
+  // Update streak
+  const streak = await updateStreak();
 
   // Log to today's session
-  await logSessionReview(xpEarned);
+  await logSessionReview();
 
-  return { xpEarned, quality };
+  return { quality, passed: quality >= 3, masteryBefore, masteryAfter, streak };
 }
 
-async function updateStreakAndXP(xpEarned: number): Promise<void> {
+async function updateStreak(): Promise<number> {
   const stats = await getUserStats();
   const today = new Date().toISOString().split('T')[0];
-  const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
-
-  let newStreak = stats.streak;
-  if (stats.lastReviewDate === today) {
-    // Already reviewed today, streak unchanged
-  } else if (stats.lastReviewDate === yesterday) {
-    // Consecutive day: extend streak
-    newStreak = stats.streak + 1;
-  } else {
-    // Streak broken (or first ever review)
-    newStreak = 1;
-  }
+  const newStreak = nextStreak(stats.lastReviewDate, stats.streak);
 
   await db
     .update(userStats)
     .set({
-      totalXP: sql`${userStats.totalXP} + ${xpEarned}`,
       streak: newStreak,
       longestStreak: sql`MAX(${userStats.longestStreak}, ${newStreak})`,
       lastReviewDate: today,
     })
     .where(eq(userStats.id, 1));
+
+  return newStreak;
 }
 
-async function logSessionReview(xpEarned: number): Promise<void> {
+async function logSessionReview(): Promise<void> {
   const today = new Date().toISOString().split('T')[0];
   const existing = await db
     .select()
@@ -377,14 +378,12 @@ async function logSessionReview(xpEarned: number): Promise<void> {
       .update(sessions)
       .set({
         versesReviewed: sql`${sessions.versesReviewed} + 1`,
-        xpEarned: sql`${sessions.xpEarned} + ${xpEarned}`,
       })
       .where(eq(sessions.date, today));
   } else {
     await db.insert(sessions).values({
       date: today,
       versesReviewed: 1,
-      xpEarned,
       createdAt: new Date().toISOString(),
     });
   }
@@ -413,14 +412,27 @@ export async function updateSettings(settings: {
     .where(eq(userStats.id, 1));
 }
 
-export async function getRecentSessions(days = 30): Promise<Array<{ date: string; versesReviewed: number; xpEarned: number }>> {
+export async function getRecentSessions(days = 30): Promise<Array<{ date: string; versesReviewed: number }>> {
   const cutoff = new Date(Date.now() - days * 86400000).toISOString().split('T')[0];
   return db
-    .select({ date: sessions.date, versesReviewed: sessions.versesReviewed, xpEarned: sessions.xpEarned })
+    .select({ date: sessions.date, versesReviewed: sessions.versesReviewed })
     .from(sessions)
     .where(sql`${sessions.date} >= ${cutoff}`)
     .orderBy(sessions.date)
     .all();
+}
+
+/**
+ * How many verses were reviewed today (for the daily goal).
+ */
+export async function getTodayReviewCount(): Promise<number> {
+  const today = new Date().toISOString().split('T')[0];
+  const row = await db
+    .select({ versesReviewed: sessions.versesReviewed })
+    .from(sessions)
+    .where(eq(sessions.date, today))
+    .get();
+  return row?.versesReviewed ?? 0;
 }
 
 export async function getDueCount(): Promise<number> {

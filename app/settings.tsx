@@ -5,8 +5,12 @@ import {
   ScrollView,
   StyleSheet,
   Alert,
+  Linking,
+  Platform,
 } from 'react-native';
 import { useFocusEffect } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
+import Constants from 'expo-constants';
 import { Colors } from '../constants/Colors';
 import { Fonts, Spacing, Radii, Shadows } from '../constants/Theme';
 import { Title, Body, Caption, Overline } from '../components/Typography';
@@ -15,9 +19,12 @@ import { Button } from '../components/Button';
 import { getUserStats, updateSettings } from '../lib/db';
 import type { UserStats } from '../lib/db/schema';
 
+const FEEDBACK_EMAIL = 'jeongwanc@gmail.com';
+
 export default function SettingsScreen() {
   const [stats, setStats] = useState<UserStats | null>(null);
   const [passThreshold, setPassThreshold] = useState(85);
+  const [dailyGoal, setDailyGoal] = useState(10);
   const [saving, setSaving] = useState(false);
 
   useFocusEffect(
@@ -25,16 +32,33 @@ export default function SettingsScreen() {
       getUserStats().then((s) => {
         setStats(s);
         setPassThreshold(s.passThreshold);
+        setDailyGoal(s.dailyGoal);
       });
     }, []),
   );
 
   const save = useCallback(async () => {
     setSaving(true);
-    await updateSettings({ passThreshold });
+    await updateSettings({ passThreshold, dailyGoal });
     setSaving(false);
     Alert.alert('Saved', 'Settings updated.');
-  }, [passThreshold]);
+  }, [passThreshold, dailyGoal]);
+
+  const sendFeedback = useCallback(async () => {
+    const version = Constants.expoConfig?.version ?? '1.0.0';
+    const subject = encodeURIComponent('memoryVerse feedback');
+    const body = encodeURIComponent(
+      '\n\n—\n' +
+      `App version: ${version}\n` +
+      `Platform: ${Platform.OS} ${Platform.Version}\n` +
+      `Verses in library: ${stats?.versesLearned ?? 0}`,
+    );
+    try {
+      await Linking.openURL(`mailto:${FEEDBACK_EMAIL}?subject=${subject}&body=${body}`);
+    } catch {
+      Alert.alert('No email app found', `You can reach us at ${FEEDBACK_EMAIL}`);
+    }
+  }, [stats]);
 
   const thresholdLabel = (t: number) => {
     if (t >= 95) return 'Strict';
@@ -50,14 +74,42 @@ export default function SettingsScreen() {
         <Title>Bible Translation</Title>
         <View style={styles.optionRow}>
           <View style={[styles.optionChip, styles.optionChipSelected]}>
-            <Caption style={styles.optionTextSelected}>KJV</Caption>
+            <Caption style={styles.optionTextSelected}>BSB</Caption>
           </View>
           <View style={styles.optionChip}>
-            <Caption>NIV (coming soon)</Caption>
+            <Caption>More coming soon</Caption>
           </View>
-          <View style={styles.optionChip}>
-            <Caption>ESV (coming soon)</Caption>
-          </View>
+        </View>
+        <Caption color={Colors.textTertiary}>
+          The Holy Bible, Berean Standard Bible, BSB is produced in cooperation
+          with Bible Hub, Discovery Bible, OpenBible.com, and the Berean Bible
+          Translation Committee. Public domain.
+        </Caption>
+      </Card>
+
+      {/* Daily goal */}
+      <Card style={styles.section}>
+        <Title>Daily Goal</Title>
+        <Body color={Colors.textSecondary} style={{ fontSize: 13 }}>
+          How many verse reviews you aim to complete each day.
+        </Body>
+        <View style={styles.segmentedControl}>
+          {[5, 10, 15, 20].map((v) => (
+            <Pressable
+              key={v}
+              style={[styles.segment, dailyGoal === v && styles.segmentSelected]}
+              onPress={() => setDailyGoal(v)}
+            >
+              <Caption
+                style={[
+                  styles.segmentText,
+                  dailyGoal === v && styles.segmentTextSelected,
+                ]}
+              >
+                {v}
+              </Caption>
+            </Pressable>
+          ))}
         </View>
       </Card>
 
@@ -65,7 +117,8 @@ export default function SettingsScreen() {
       <Card style={styles.section}>
         <Title>Pass Threshold</Title>
         <Body color={Colors.textSecondary} style={{ fontSize: 13 }}>
-          Minimum similarity score to count a review as successful.
+          Minimum recitation score to count as successful recall. Scores below
+          this re-queue the verse for more practice.
         </Body>
         <View style={styles.thresholdDisplay}>
           <Title style={styles.thresholdValue}>{passThreshold}%</Title>
@@ -101,6 +154,26 @@ export default function SettingsScreen() {
         </Card>
       )}
 
+      {/* Feedback */}
+      <Card style={styles.section}>
+        <Title>Feedback</Title>
+        <Pressable
+          style={styles.feedbackRow}
+          onPress={sendFeedback}
+          accessibilityRole="button"
+          accessibilityLabel="Send feedback by email"
+        >
+          <View style={styles.feedbackIcon}>
+            <Ionicons name="chatbubble-ellipses" size={18} color={Colors.primary} />
+          </View>
+          <View style={{ flex: 1, gap: 2 }}>
+            <Body style={{ fontFamily: Fonts.semiBold }}>Send Feedback</Body>
+            <Caption>Found a bug or have an idea? Email us.</Caption>
+          </View>
+          <Ionicons name="chevron-forward" size={16} color={Colors.textTertiary} />
+        </Pressable>
+      </Card>
+
       {/* SM-2 info */}
       <Card variant="tinted" style={styles.infoSection}>
         <Title style={{ color: Colors.primary, fontSize: 14 }}>How spaced repetition works</Title>
@@ -108,11 +181,9 @@ export default function SettingsScreen() {
           memoryVerse uses the SM-2 algorithm (same as Anki). After each review,
           the next due date is calculated based on your performance.
           {'\n\n'}
-          {'\u2022'} 95{'\u2013'}100% {'\u2192'} Perfect (next review in ~21 days after repeated success){'\n'}
-          {'\u2022'} 85{'\u2013'}94% {'\u2192'} Good{'\n'}
-          {'\u2022'} 70{'\u2013'}84% {'\u2192'} Okay{'\n'}
-          {'\u2022'} 50{'\u2013'}69% {'\u2192'} Hard{'\n'}
-          {'\u2022'} {'<'}50% {'\u2192'} Failed (re-queued immediately)
+          Score at or above your pass threshold and the verse moves further
+          out (1 day {'\u2192'} 6 days {'\u2192'} weeks). Score below it and the
+          verse is re-queued for today so you can nail it down.
         </Body>
       </Card>
 
@@ -196,6 +267,20 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.sm,
     borderBottomWidth: 1,
     borderBottomColor: Colors.divider,
+  },
+
+  feedbackRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.md,
+  },
+  feedbackIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: Colors.primaryFaint,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 
   infoSection: {

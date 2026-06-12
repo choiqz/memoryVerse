@@ -234,7 +234,7 @@ export default function AddScreen() {
           ListEmptyComponent={
             <View style={styles.emptyState}>
               <Body color={Colors.textSecondary}>No Bible data loaded.</Body>
-              <Caption>Make sure kjv.json is in assets/bible/</Caption>
+              <Caption>Make sure bsb.json is in assets/bible/</Caption>
             </View>
           }
         />

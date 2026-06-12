@@ -23,7 +23,8 @@ import { Fonts, Spacing, Radii, Shadows } from '../constants/Theme';
 import { Display, Body, Caption, Overline, Title } from '../components/Typography';
 import { IconBadge } from '../components/IconBadge';
 import { Card } from '../components/Card';
-import { getUserStats, getDueCount } from '../lib/db';
+import { ProgressBar } from '../components/ProgressBar';
+import { getUserStats, getDueCount, getTodayReviewCount } from '../lib/db';
 import type { UserStats } from '../lib/db/schema';
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
@@ -40,6 +41,7 @@ export default function HomeScreen() {
   const router = useRouter();
   const [stats, setStats] = useState<UserStats | null>(null);
   const [dueCount, setDueCount] = useState(0);
+  const [todayCount, setTodayCount] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
   const [greeting] = useState(() => GREETINGS[Math.floor(Math.random() * GREETINGS.length)]);
 
@@ -80,9 +82,10 @@ export default function HomeScreen() {
   }, []);
 
   const loadData = useCallback(async () => {
-    const [s, d] = await Promise.all([getUserStats(), getDueCount()]);
+    const [s, d, t] = await Promise.all([getUserStats(), getDueCount(), getTodayReviewCount()]);
     setStats(s);
     setDueCount(d);
+    setTodayCount(t);
   }, []);
 
   useFocusEffect(
@@ -99,6 +102,10 @@ export default function HomeScreen() {
 
   const streakDays = stats?.streak ?? 0;
   const versesLearned = stats?.versesLearned ?? 0;
+  const dailyGoal = stats?.dailyGoal ?? 10;
+  const goalProgress = Math.min(todayCount / dailyGoal, 1);
+  const goalMet = todayCount >= dailyGoal;
+  const emptyLibrary = stats !== null && versesLearned === 0;
 
   return (
     <ScrollView
@@ -144,13 +151,33 @@ export default function HomeScreen() {
       {/* Hero CTA */}
       <AnimatedPressable
         entering={FadeInUp.delay(200).duration(500)}
-        style={[styles.heroCta, dueCount === 0 && styles.heroCtaDone]}
-        onPress={() => dueCount > 0 && router.push('/review')}
-        disabled={dueCount === 0}
-        accessibilityLabel={dueCount > 0 ? 'Start review session' : 'No verses due'}
+        style={[styles.heroCta, dueCount === 0 && !emptyLibrary && styles.heroCtaDone]}
+        onPress={() => {
+          if (emptyLibrary) router.push('/add');
+          else if (dueCount > 0) router.push('/review');
+        }}
+        disabled={!emptyLibrary && dueCount === 0}
+        accessibilityLabel={
+          emptyLibrary ? 'Add your first verse' : dueCount > 0 ? 'Start review session' : 'No verses due'
+        }
         accessibilityRole="button"
       >
-        {dueCount > 0 ? (
+        {emptyLibrary ? (
+          <>
+            <View style={styles.heroTop}>
+              <Ionicons name="sparkles" size={22} color="rgba(255,255,255,0.8)" />
+              <Title style={styles.heroDueText}>Start your journey</Title>
+            </View>
+            <View style={styles.heroBottom}>
+              <View style={styles.heroButton}>
+                <Title style={styles.heroButtonText}>Add Your First Verse</Title>
+                <Animated.View style={arrowStyle}>
+                  <Ionicons name="arrow-forward" size={20} color={Colors.primary} />
+                </Animated.View>
+              </View>
+            </View>
+          </>
+        ) : dueCount > 0 ? (
           <>
             <View style={styles.heroTop}>
               <Ionicons name="mic" size={22} color="rgba(255,255,255,0.8)" />
@@ -176,6 +203,30 @@ export default function HomeScreen() {
         )}
       </AnimatedPressable>
 
+      {/* Daily goal */}
+      {!emptyLibrary && (
+        <Animated.View entering={FadeInUp.delay(250).duration(500)} style={styles.goalCard}>
+          <View style={styles.goalHeader}>
+            <View style={styles.goalLabelRow}>
+              <Ionicons
+                name={goalMet ? 'checkmark-circle' : 'today'}
+                size={16}
+                color={goalMet ? Colors.success : Colors.primary}
+              />
+              <Title style={styles.goalLabel}>Daily Goal</Title>
+            </View>
+            <Caption style={goalMet ? { color: Colors.success, fontFamily: Fonts.bold } : undefined}>
+              {goalMet ? 'Complete!' : `${todayCount} / ${dailyGoal} verses`}
+            </Caption>
+          </View>
+          <ProgressBar
+            progress={goalProgress}
+            height={8}
+            color={goalMet ? Colors.success : Colors.primary}
+          />
+        </Animated.View>
+      )}
+
       {/* Quick actions */}
       <Animated.View entering={FadeInUp.delay(300).duration(500)} style={styles.quickActions}>
         <ActionCard
@@ -183,7 +234,7 @@ export default function HomeScreen() {
           iconColor={Colors.primary}
           iconBg={Colors.primaryFaint}
           label="Add Verses"
-          subtitle="Browse & pick from KJV"
+          subtitle="Browse & pick from BSB"
           onPress={() => router.push('/add')}
         />
         <ActionCard
@@ -341,6 +392,28 @@ const styles = StyleSheet.create({
   heroDoneSubtitle: {
     color: 'rgba(255,255,255,0.8)',
     textAlign: 'center',
+  },
+
+  // Daily goal
+  goalCard: {
+    backgroundColor: Colors.surface,
+    borderRadius: Radii.lg,
+    padding: Spacing.lg,
+    gap: Spacing.md,
+    ...Shadows.sm,
+  },
+  goalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  goalLabelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  goalLabel: {
+    fontSize: 14,
   },
 
   // Quick actions

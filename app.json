@@ -16,7 +16,8 @@
       "bundleIdentifier": "com.memoryverse.app",
       "infoPlist": {
         "NSSpeechRecognitionUsageDescription": "Allow memoryVerse to use speech recognition to score your recitations.",
-        "NSMicrophoneUsageDescription": "Allow memoryVerse to use the microphone for verse recitation."
+        "NSMicrophoneUsageDescription": "Allow memoryVerse to use the microphone for verse recitation.",
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {

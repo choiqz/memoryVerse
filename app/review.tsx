@@ -37,17 +37,22 @@ import { ProgressBar } from '../components/ProgressBar';
 import { AnimatedCounter } from '../components/AnimatedCounter';
 import { ConfettiOverlay, type ConfettiRef } from '../components/ConfettiOverlay';
 import { MasteryBadge } from '../components/MasteryBadge';
-import { getDueVerses, recordReview } from '../lib/db';
-import type { UserVerse, Verse } from '../lib/db/schema';
+import { getDueVerses, recordReview, getUserStats, type ReviewResult } from '../lib/db';
+import type { UserVerse, Verse, UserStats } from '../lib/db/schema';
 import { useSpeech } from '../lib/speech';
 import { scoreSimilarity, generateHints, type HintWord } from '../lib/similarity';
-import { similarityToQuality, getMasteryLevel } from '../lib/srs';
+import { getMasteryLevel, MASTERY_LABELS, MASTERY_EMOJIS, type MasteryLevel } from '../lib/srs';
 import { formatRef } from '../lib/bible';
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
 type ReviewItem = UserVerse & Verse;
-type ReviewPhase = 'preview' | 'reciting' | 'scored';
+type ReviewPhase = 'learn' | 'preview' | 'reciting' | 'scored';
+
+/** A verse the user has never attempted gets a read-first learn step. */
+function isNewVerse(v: ReviewItem): boolean {
+  return v.repetitions === 0 && v.lastScore === 0;
+}
 
 const REVEAL_PENALTY = 2;
 
@@ -76,6 +81,8 @@ export default function ReviewScreen() {
   const [loading, setLoading] = useState(true);
   const [finished, setFinished] = useState(false);
   const [typedText, setTypedText] = useState('');
+  const [reviewResult, setReviewResult] = useState<ReviewResult | null>(null);
+  const [finalStats, setFinalStats] = useState<UserStats | null>(null);
 
   // Reanimated values
   const cardOpacity = useSharedValue(1);
@@ -98,10 +105,20 @@ export default function ReviewScreen() {
       setQueue(verses);
       if (verses.length > 0) {
         setHints(generateHints(verses[0].text));
+        setPhase(isNewVerse(verses[0]) ? 'learn' : 'preview');
       }
       setLoading(false);
     });
   }, []);
+
+  // Session-complete celebration
+  useEffect(() => {
+    if (finished) {
+      getUserStats().then(setFinalStats);
+      const t = setTimeout(() => confettiRef.current?.fire(), 400);
+      return () => clearTimeout(t);
+    }
+  }, [finished]);
 
   const handleTranscript = useCallback(
     async (transcript: string) => {
@@ -126,17 +143,19 @@ export default function ReviewScreen() {
         setTimeout(() => confettiRef.current?.fire(), 300);
       }
 
-      await recordReview(currentVerse.id, Math.round(finalScore));
+      const result = await recordReview(currentVerse.id, Math.round(finalScore));
+      setReviewResult(result);
     },
     [currentVerse, revealedCount],
   );
 
   const advanceState = useCallback((nextIdx: number) => {
     setCurrentIndex(nextIdx);
-    setPhase('preview');
+    setPhase(isNewVerse(queue[nextIdx]) ? 'learn' : 'preview');
     setHints(generateHints(queue[nextIdx].text));
     setRevealedCount(0);
     setTypedText('');
+    setReviewResult(null);
     speech.reset();
   }, [queue, speech]);
 
@@ -196,13 +215,13 @@ export default function ReviewScreen() {
         {
           text: 'Skip',
           onPress: () => {
-            setQueue((q) => {
-              const next = [...q];
-              const [skipped] = next.splice(currentIndex, 1);
-              next.push(skipped);
-              return next;
-            });
-            setHints(generateHints(queue[currentIndex + 1]?.text ?? queue[0].text));
+            const next = [...queue];
+            const [skipped] = next.splice(currentIndex, 1);
+            next.push(skipped);
+            const upcoming = next[currentIndex];
+            setQueue(next);
+            setHints(generateHints(upcoming.text));
+            setPhase(isNewVerse(upcoming) ? 'learn' : 'preview');
             setRevealedCount(0);
             setTypedText('');
             speech.reset();
@@ -240,12 +259,14 @@ export default function ReviewScreen() {
   }
 
   if (finished) {
+    const streak = finalStats?.streak ?? 0;
+    const isRecord = streak > 1 && streak === (finalStats?.longestStreak ?? 0);
     return (
       <View style={styles.center}>
         <ConfettiOverlay ref={confettiRef} />
-        <View style={styles.finishedIcon}>
+        <Animated.View entering={FadeIn.duration(400)} style={styles.finishedIcon}>
           <Ionicons name="checkmark-circle" size={48} color={Colors.success} />
-        </View>
+        </Animated.View>
         <Heading>Session Complete!</Heading>
         <View style={styles.sessionStats}>
           <Card style={styles.finStatCard}>
@@ -253,7 +274,20 @@ export default function ReviewScreen() {
             <AnimatedCounter value={sessionReviewed} color={Colors.primary} style={styles.finStatValue} />
             <Overline>Verses Reviewed</Overline>
           </Card>
+          <Card style={styles.finStatCard}>
+            <IconBadge name="flame" color={Colors.streak} size={16} />
+            <AnimatedCounter value={streak} color={Colors.streak} style={styles.finStatValue} />
+            <Overline>Day Streak</Overline>
+          </Card>
         </View>
+        {isRecord && (
+          <Animated.View entering={FadeIn.delay(600).duration(400)} style={styles.recordBanner}>
+            <Ionicons name="trophy" size={16} color={Colors.secondary} />
+            <Body style={{ color: Colors.secondary, fontFamily: Fonts.bold, fontSize: 14 }}>
+              Longest streak yet!
+            </Body>
+          </Animated.View>
+        )}
         <Button size="lg" onPress={() => router.back()}>Back to Home</Button>
       </View>
     );
@@ -288,10 +322,28 @@ export default function ReviewScreen() {
             score={score}
             transcript={speech.transcript}
             verseText={verse.text}
+            result={reviewResult}
           />
         )}
 
-        {phase !== 'scored' && (
+        {phase === 'learn' && (
+          <Animated.View style={[styles.card, cardAnimStyle]}>
+            <View style={styles.newBadge}>
+              <Ionicons name="sparkles" size={12} color={Colors.primary} />
+              <Overline style={{ color: Colors.primary }}>New Verse</Overline>
+            </View>
+            <View style={styles.refContainer}>
+              <Title style={styles.reference} color={Colors.primary}>{ref}</Title>
+              <View style={styles.refAccent} />
+            </View>
+            <Body style={styles.learnVerseText}>{verse.text}</Body>
+            <Caption style={{ textAlign: 'center' }}>
+              Read it aloud a few times. When it sticks, recite it from memory.
+            </Caption>
+          </Animated.View>
+        )}
+
+        {phase !== 'scored' && phase !== 'learn' && (
           <Animated.View style={[styles.card, cardAnimStyle]}>
             {/* Reference */}
             <View style={styles.refContainer}>
@@ -368,6 +420,10 @@ export default function ReviewScreen() {
           <Button size="lg" onPress={advanceToNext}>
             {currentIndex + 1 < queue.length ? 'Next Verse  \u2192' : 'Finish Session  \u2192'}
           </Button>
+        ) : phase === 'learn' ? (
+          <Button size="lg" onPress={() => setPhase('preview')}>
+            Recite from Memory  {'\u2192'}
+          </Button>
         ) : speech.isSupported ? (
           phase === 'reciting' ? (
             <RecitingControls
@@ -399,16 +455,27 @@ export default function ReviewScreen() {
 
 // ─── Score Card ──────────────────────────────────────────────────────────────
 
+const MASTERY_RANK: Record<MasteryLevel, number> = {
+  'seedling': 0,
+  'growing': 1,
+  'rooted': 2,
+  'deep-rooted': 3,
+};
+
 function ScoreCard({
   score,
   transcript,
   verseText,
+  result,
 }: {
   score: number;
   transcript: string;
   verseText: string;
+  result: ReviewResult | null;
 }) {
   const tier = getScoreTier(score);
+  const leveledUp =
+    result && MASTERY_RANK[result.masteryAfter] > MASTERY_RANK[result.masteryBefore];
 
   return (
     <Animated.View
@@ -420,6 +487,18 @@ function ScoreCard({
         <AnimatedCounter value={score} suffix="%" color={Colors.text} style={styles.scoreValue} />
         <Title style={{ color: tier.color, textAlign: 'center' }}>{tier.label}</Title>
       </View>
+
+      {leveledUp && (
+        <Animated.View entering={FadeIn.delay(500).duration(400)} style={styles.levelUpBanner}>
+          <Text style={styles.levelUpEmoji}>{MASTERY_EMOJIS[result.masteryAfter]}</Text>
+          <View style={{ flex: 1 }}>
+            <Overline style={{ color: Colors.primary }}>Mastery Up</Overline>
+            <Title style={{ fontSize: 15 }}>
+              This verse is now {MASTERY_LABELS[result.masteryAfter]}
+            </Title>
+          </View>
+        </Animated.View>
+      )}
 
       {transcript ? (
         <View style={styles.transcriptBox}>
@@ -719,6 +798,36 @@ const styles = StyleSheet.create({
     gap: 6,
   },
 
+  // Learn phase
+  newBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'center',
+    gap: 6,
+    backgroundColor: Colors.primaryFaint,
+    borderRadius: Radii.sm,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  learnVerseText: {
+    fontSize: 18,
+    lineHeight: 30,
+    textAlign: 'center',
+  },
+
+  // Mastery level-up
+  levelUpBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.md,
+    backgroundColor: Colors.primaryFaint,
+    borderRadius: Radii.md,
+    padding: Spacing.md,
+  },
+  levelUpEmoji: {
+    fontSize: 28,
+  },
+
   // Score card
   scoreCard: {
     backgroundColor: Colors.surface,
@@ -907,6 +1016,15 @@ const styles = StyleSheet.create({
     fontFamily: Fonts.extraBold,
     fontSize: 24,
     letterSpacing: -0.5,
+  },
+  recordBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: Colors.warningLight,
+    borderRadius: Radii.md,
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.sm,
   },
 
   // Text input fallback

@@ -1,6 +1,7 @@
 /**
  * Bible data loader.
- * Loads bundled KJV JSON and seeds the local SQLite database.
+ * Loads bundled BSB (Berean Standard Bible, public domain) JSON and seeds
+ * the local SQLite database.
  */
 import { upsertVerses, getAllBooks, getVersePacks, insertVersePack, upsertVerseWithRange, insertVersePackItem } from './db';
 
@@ -11,8 +12,8 @@ export interface BibleVerse {
   text: string;
 }
 
-// KJV book order for display
-export const KJV_BOOK_ORDER = [
+// Canonical Protestant book order for display
+export const BOOK_ORDER = [
   // Old Testament
   'Genesis', 'Exodus', 'Leviticus', 'Numbers', 'Deuteronomy',
   'Joshua', 'Judges', 'Ruth', '1 Samuel', '2 Samuel',
@@ -31,23 +32,23 @@ export const KJV_BOOK_ORDER = [
   'Jude', 'Revelation',
 ];
 
-export const KJV_TESTAMENT: Record<string, 'OT' | 'NT'> = {};
-KJV_BOOK_ORDER.forEach((book, i) => {
-  KJV_TESTAMENT[book] = i < 39 ? 'OT' : 'NT';
+export const TESTAMENT: Record<string, 'OT' | 'NT'> = {};
+BOOK_ORDER.forEach((book, i) => {
+  TESTAMENT[book] = i < 39 ? 'OT' : 'NT';
 });
 
 /**
- * Seed the database with bundled KJV data.
+ * Seed the database with bundled BSB data.
  * Only runs on first launch (checks if verses table is populated).
  */
 export async function seedBibleData(): Promise<void> {
   const existingBooks = await getAllBooks();
   if (existingBooks.length > 0) return; // already seeded
 
-  // Load the bundled KJV data (Metro bundler resolves JSON requires at build time)
+  // Load the bundled BSB data (Metro bundler resolves JSON requires at build time)
   // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const kjvData: BibleVerse[] = require('../assets/bible/kjv.json') as BibleVerse[];
-  await upsertVerses(kjvData);
+  const bsbData: BibleVerse[] = require('../assets/bible/bsb.json') as BibleVerse[];
+  await upsertVerses(bsbData);
 }
 
 /**
@@ -103,12 +104,12 @@ export function formatRef(book: string, chapter: number, verse: number, verseEnd
 }
 
 /**
- * Sort books by canonical KJV order.
+ * Sort books by canonical order.
  */
 export function sortBooksByOrder(books: string[]): string[] {
   return [...books].sort((a, b) => {
-    const ai = KJV_BOOK_ORDER.indexOf(a);
-    const bi = KJV_BOOK_ORDER.indexOf(b);
+    const ai = BOOK_ORDER.indexOf(a);
+    const bi = BOOK_ORDER.indexOf(b);
     if (ai === -1 && bi === -1) return a.localeCompare(b);
     if (ai === -1) return 1;
     if (bi === -1) return -1;

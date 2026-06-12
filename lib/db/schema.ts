@@ -10,7 +10,7 @@ export const verses = sqliteTable('verses', {
   verse: integer('verse').notNull(),
   verseEnd: integer('verse_end'),
   text: text('text').notNull(),
-  translation: text('translation').notNull().default('KJV'),
+  translation: text('translation').notNull().default('BSB'),
 });
 
 /**
@@ -34,7 +34,6 @@ export const sessions = sqliteTable('sessions', {
   id: integer('id').primaryKey({ autoIncrement: true }),
   date: text('date').notNull(),                 // ISO date: YYYY-MM-DD
   versesReviewed: integer('verses_reviewed').notNull().default(0),
-  xpEarned: integer('xp_earned').notNull().default(0),
   createdAt: text('created_at').notNull(),
 });
 
@@ -45,12 +44,11 @@ export const userStats = sqliteTable('user_stats', {
   id: integer('id').primaryKey().default(1),
   streak: integer('streak').notNull().default(0),
   longestStreak: integer('longest_streak').notNull().default(0),
-  totalXP: integer('total_xp').notNull().default(0),
   versesLearned: integer('verses_learned').notNull().default(0),
   lastReviewDate: text('last_review_date'),     // ISO date or null
   dailyGoal: integer('daily_goal').notNull().default(10),
   passThreshold: integer('pass_threshold').notNull().default(85), // 0–100
-  translation: text('translation').notNull().default('KJV'),
+  translation: text('translation').notNull().default('BSB'),
 });
 
 /**
@@ -63,7 +61,7 @@ export const versePacks = sqliteTable('verse_packs', {
   description: text('description'),
   icon: text('icon').notNull().default('book'),
   verseCount: integer('verse_count').notNull().default(0),
-  translation: text('translation').notNull().default('ESV'),
+  translation: text('translation').notNull().default('BSB'),
   sortOrder: integer('sort_order').notNull().default(0),
 });
 

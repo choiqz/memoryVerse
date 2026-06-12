@@ -20,30 +20,22 @@ export interface SRSResult {
 
 /**
  * Map similarity score (0–100) to SM-2 quality (0–5).
+ *
+ * The user's pass threshold sets the quality-3 boundary: scores at or above
+ * it count as successful recall (quality 3–5), scores below it fail the card
+ * (quality 0–2) and reset its repetition count.
  */
-export function similarityToQuality(similarity: number): number {
-  if (similarity >= 95) return 5; // perfect
-  if (similarity >= 85) return 4; // good
-  if (similarity >= 70) return 3; // okay
-  if (similarity >= 50) return 2; // hard
-  if (similarity >= 25) return 1; // very hard
-  return 0;                        // blackout
-}
+export function similarityToQuality(similarity: number, passThreshold = 85): number {
+  const threshold = Math.max(50, Math.min(95, passThreshold));
 
-/**
- * Calculate XP earned for a review.
- */
-export function calculateXP(quality: number): number {
-  const base = 10;
-  const multipliers: Record<number, number> = {
-    5: 2.0,
-    4: 1.5,
-    3: 1.0,
-    2: 0.5,
-    1: 0.25,
-    0: 0,
-  };
-  return Math.round(base * (multipliers[quality] ?? 0));
+  if (similarity >= threshold) {
+    if (similarity >= 95) return 5;                          // perfect
+    if (similarity >= threshold + (95 - threshold) / 2) return 4; // good
+    return 3;                                                 // okay
+  }
+  if (similarity >= threshold * 0.6) return 2; // hard
+  if (similarity >= threshold * 0.3) return 1; // very hard
+  return 0;                                    // blackout
 }
 
 /**
@@ -119,6 +111,25 @@ function addDays(date: Date, days: number): Date {
   const result = new Date(date);
   result.setDate(result.getDate() + days);
   return result;
+}
+
+/**
+ * Compute the new streak after a review today.
+ * - Same-day review: streak unchanged
+ * - Reviewed yesterday: streak + 1
+ * - Otherwise (gap or first review): reset to 1
+ */
+export function nextStreak(
+  lastReviewDate: string | null,
+  currentStreak: number,
+  now: Date = new Date(),
+): number {
+  const today = now.toISOString().split('T')[0];
+  const yesterday = new Date(now.getTime() - 86400000).toISOString().split('T')[0];
+
+  if (lastReviewDate === today) return currentStreak;
+  if (lastReviewDate === yesterday) return currentStreak + 1;
+  return 1;
 }
 
 /**

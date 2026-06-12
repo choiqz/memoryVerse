@@ -3,6 +3,8 @@ import {
   View,
   ScrollView,
   StyleSheet,
+  Pressable,
+  Alert,
 } from 'react-native';
 import Animated, { FadeInUp } from 'react-native-reanimated';
 import { useFocusEffect } from 'expo-router';
@@ -13,7 +15,7 @@ import { Card } from '../components/Card';
 import { IconBadge } from '../components/IconBadge';
 import { MasteryBadge } from '../components/MasteryBadge';
 import { ProgressBar } from '../components/ProgressBar';
-import { getUserStats, getAllUserVerses, getRecentSessions } from '../lib/db';
+import { getUserStats, getAllUserVerses, getRecentSessions, removeVerseFromLibrary } from '../lib/db';
 import type { UserStats, UserVerse, Verse } from '../lib/db/schema';
 import { getMasteryLevel, MASTERY_LABELS, type MasteryLevel } from '../lib/srs';
 import { formatRef } from '../lib/bible';
@@ -23,21 +25,39 @@ type UserVerseWithVerse = UserVerse & Verse;
 export default function ProgressScreen() {
   const [stats, setStats] = useState<UserStats | null>(null);
   const [userVerses, setUserVerses] = useState<UserVerseWithVerse[]>([]);
-  const [sessions, setSessions] = useState<{ date: string; versesReviewed: number; xpEarned: number }[]>([]);
+  const [sessions, setSessions] = useState<{ date: string; versesReviewed: number }[]>([]);
 
-  useFocusEffect(
-    useCallback(() => {
-      Promise.all([
-        getUserStats(),
-        getAllUserVerses(),
-        getRecentSessions(30),
-      ]).then(([s, uv, sess]) => {
-        setStats(s);
-        setUserVerses(uv);
-        setSessions(sess);
-      });
-    }, []),
-  );
+  const loadData = useCallback(() => {
+    Promise.all([
+      getUserStats(),
+      getAllUserVerses(),
+      getRecentSessions(30),
+    ]).then(([s, uv, sess]) => {
+      setStats(s);
+      setUserVerses(uv);
+      setSessions(sess);
+    });
+  }, []);
+
+  useFocusEffect(loadData);
+
+  const confirmRemove = useCallback((uv: UserVerseWithVerse) => {
+    Alert.alert(
+      'Remove Verse',
+      `Remove ${formatRef(uv.book, uv.chapter, uv.verse, uv.verseEnd)} from your library? Your progress on it will be lost.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Remove',
+          style: 'destructive',
+          onPress: async () => {
+            await removeVerseFromLibrary(uv.id);
+            loadData();
+          },
+        },
+      ],
+    );
+  }, [loadData]);
 
   const masteryGroups = {
     'deep-rooted': userVerses.filter((v) => getMasteryLevel(v.repetitions, v.interval) === 'deep-rooted'),
@@ -164,10 +184,17 @@ export default function ProgressScreen() {
         <Animated.View entering={FadeInUp.delay(400).duration(400)}>
           <Card style={styles.section}>
             <Title>My Library ({userVerses.length})</Title>
+            <Caption color={Colors.textTertiary}>Press and hold a verse to remove it.</Caption>
             {userVerses.map((uv) => {
               const level = getMasteryLevel(uv.repetitions, uv.interval);
               return (
-                <View key={uv.id} style={styles.libraryItem}>
+                <Pressable
+                  key={uv.id}
+                  style={styles.libraryItem}
+                  onLongPress={() => confirmRemove(uv)}
+                  delayLongPress={400}
+                  accessibilityLabel={`${formatRef(uv.book, uv.chapter, uv.verse, uv.verseEnd)} — long press to remove`}
+                >
                   <View style={styles.libraryItemLeft}>
                     <Overline style={{ color: Colors.primary }}>
                       {formatRef(uv.book, uv.chapter, uv.verse, uv.verseEnd)}
@@ -175,7 +202,7 @@ export default function ProgressScreen() {
                     <Caption numberOfLines={2}>{uv.text}</Caption>
                   </View>
                   <MasteryBadge level={level} size={14} />
-                </View>
+                </Pressable>
               );
             })}
           </Card>
